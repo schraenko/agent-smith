@@ -45,6 +45,13 @@ Whether you need a single autonomous agent or a network of cooperating agents ta
 
 ---
 
+## Dependencies
+```bash
+pip install -r requirements.txt
+pip install --upgrade setuptools
+pip install -e .
+```
+
 ## Quickstart
 
 ```bash
