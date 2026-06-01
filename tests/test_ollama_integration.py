@@ -7,52 +7,43 @@ Run with:
 """
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent_smith.llm.ollama import OllamaConfig, complete
-from agent_smith.types import Message, Role
+from agent_smith.llm import OllamaConfig, make_llm
 
 
 @pytest.fixture
-def config():
-    return OllamaConfig(model="phi4:latest", temperature=0.0)
+def llm():
+    return make_llm(OllamaConfig(model="phi4:latest", temperature=0.0))
 
 
-def test_ollama_simple_completion(config):
-    """Ollama responds with a non-empty string."""
-    messages = [Message(role=Role.USER, content="Reply with the single word: pong")]
-
-    text, tool_calls = complete(messages=messages, config=config)
-
-    assert isinstance(text, str)
-    assert len(text.strip()) > 0
-    assert tool_calls == []
-    print(f"\nModel response: {text.strip()}")
+def test_simple_completion(llm):
+    """LLM responds with a non-empty string."""
+    response = llm.invoke([HumanMessage(content="Reply with the single word: pong")])
+    assert isinstance(response.content, str)
+    assert len(response.content.strip()) > 0
+    print(f"\nModel response: {response.content.strip()}")
 
 
-def test_ollama_system_prompt(config):
-    """System prompt is respected."""
-    messages = [Message(role=Role.USER, content="What are you?")]
-
-    text, tool_calls = complete(
-        messages=messages,
-        config=config,
-        system="You are a calculator. You only respond with numbers, nothing else.",
-    )
-
-    assert isinstance(text, str)
-    assert len(text.strip()) > 0
-    print(f"\nModel response: {text.strip()}")
-
-
-def test_ollama_multi_turn(config):
-    """Multi-turn conversation works correctly."""
+def test_system_prompt(llm):
+    """System prompt is passed and respected."""
     messages = [
-        Message(role=Role.USER, content="My name is Ada."),
-        Message(role=Role.ASSISTANT, content="Nice to meet you, Ada!"),
-        Message(role=Role.USER, content="What is my name?"),
+        SystemMessage(content="You are a calculator. Only respond with numbers."),
+        HumanMessage(content="What is 6 multiplied by 7?"),
     ]
+    response = llm.invoke(messages)
+    assert "42" in response.content
+    print(f"\nModel response: {response.content.strip()}")
 
-    text, _ = complete(messages=messages, config=config)
 
-    assert "Ada" in text
-    print(f"\nModel response: {text.strip()}")
+def test_multi_turn(llm):
+    """Conversation history is preserved across turns."""
+    from langchain_core.messages import AIMessage
+    messages = [
+        HumanMessage(content="My name is Ada."),
+        AIMessage(content="Nice to meet you, Ada!"),
+        HumanMessage(content="What is my name?"),
+    ]
+    response = llm.invoke(messages)
+    assert "Ada" in response.content
+    print(f"\nModel response: {response.content.strip()}")

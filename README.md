@@ -52,6 +52,13 @@ pip install --upgrade setuptools
 pip install -e .
 ```
 
+**You need a model that supports tool use!**
+The default model used is *Mistral:latest* with ollama.
+You can easily pull it with
+```bash
+ollama pull mistral:latest 
+```
+
 ## Quickstart
 
 ```bash
@@ -105,6 +112,12 @@ Contributions are welcome! If you want to add a new agent, improve the orchestra
 4. Open a pull request
 
 Please make sure your code is well-documented and includes tests.
+
+---
+
+## Run tests
+```
+
 
 ---
 

@@ -1,27 +1,18 @@
 """
 Core agent runner.
-An agent is just a function: (task, context, config) -> AgentResult.
-This module provides the agentic loop — LLM call → tool execution → repeat.
+The agentic loop is a plain function — no Agent class, no inheritance.
+LangChain is used only for the LLM call and message types.
 """
 
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
-from agent_smith.llm.ollama import OllamaConfig, complete
-from agent_smith.memory.store import window
-from agent_smith.tools.registry import execute_tool_calls, get_tools
-from agent_smith.types import (
-    AgentContext,
-    AgentResult,
-    Message,
-    Role,
-    Status,
-    Tool,
-    ToolCall,
-    ToolResult,
-)
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from agent_smith.llm import OllamaConfig, make_llm, make_llm_with_tools
+from agent_smith.tools.builtins import TOOL_MAP, get_tools
+from agent_smith.types import AgentResult
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +24,41 @@ class AgentConfig:
     name: str
     system_prompt: str
     llm: OllamaConfig = field(default_factory=OllamaConfig)
-    tools: list[str] | None = None        # None = no tools, [] = all tools
+    tools: list[str] | None = None
     max_iterations: int = MAX_ITERATIONS
-    context_window: int = 20              # max messages kept in context
+    context_window: int = 20
 
 
-def run_agent(
-    task: str,
-    config: AgentConfig,
-    context: AgentContext | None = None,
-) -> AgentResult:
+def _trim(messages: list, max_messages: int) -> list:
+    """Sliding window — always keep the system message if present."""
+    if not messages:
+        return []
+    if isinstance(messages[0], SystemMessage):
+        return [messages[0]] + messages[1:][-max(0, max_messages - 1):]
+    return messages[-max_messages:]
+
+
+def _execute_tool_calls(tool_calls: list) -> list[ToolMessage]:
+    """Execute all tool calls and return ToolMessages."""
+    results = []
+    for call in tool_calls:
+        name = call["name"]
+        args = call["args"]
+        tool_fn = TOOL_MAP.get(name)
+        if tool_fn is None:
+            content = json.dumps({"error": f"Unknown tool: {name}"})
+        else:
+            try:
+                content = json.dumps(tool_fn.invoke(args))
+                logger.debug("Tool %s → ok", name)
+            except Exception as e:
+                content = json.dumps({"error": str(e)})
+                logger.error("Tool %s failed: %s", name, e)
+        results.append(ToolMessage(content=content, tool_call_id=call["id"]))
+    return results
+
+
+def run_agent(task: str, config: AgentConfig) -> AgentResult:
     """
     Run the agentic loop for a single agent.
 
@@ -51,52 +67,38 @@ def run_agent(
       2. If tool calls → execute → append results → repeat
       3. If text response → done
     """
-    ctx = context or AgentContext()
-    ctx = ctx.with_message(Message(role=Role.USER, content=task))
+    tools = get_tools(config.tools) if config.tools is not None else []
+    llm = make_llm_with_tools(config.llm, tools) if tools else make_llm(config.llm)
 
-    available_tools = get_tools(config.tools) if config.tools is not None else []
+    messages = [
+        SystemMessage(content=config.system_prompt),
+        HumanMessage(content=task),
+    ]
+    intermediate_steps = []
 
     for iteration in range(config.max_iterations):
         logger.info("[%s] iteration %d/%d", config.name, iteration + 1, config.max_iterations)
 
-        windowed = window(ctx.messages, config.context_window)
+        windowed = _trim(messages, config.context_window)
 
         try:
-            text, tool_calls = complete(
-                messages=windowed,
-                config=config.llm,
-                tools=available_tools if available_tools else None,
-                system=config.system_prompt,
-            )
+            response: AIMessage = llm.invoke(windowed)
         except Exception as e:
             logger.error("[%s] LLM call failed: %s", config.name, e)
-            return AgentResult.fail(str(e), ctx)
+            return AgentResult.fail(str(e))
 
-        # No tool calls → final answer
-        if not tool_calls:
-            ctx = ctx.with_message(Message(role=Role.ASSISTANT, content=text))
-            logger.info("[%s] finished after %d iterations", config.name, iteration + 1)
-            return AgentResult.ok(output=text, context=ctx)
+        messages.append(response)
 
-        # Append assistant's intent
-        ctx = ctx.with_message(
-            Message(
-                role=Role.ASSISTANT,
-                content=text or f"[calling {len(tool_calls)} tool(s)]",
-            )
-        )
+        if not response.tool_calls:
+            logger.info("[%s] done after %d iterations", config.name, iteration + 1)
+            return AgentResult.ok(output=response.content, steps=intermediate_steps)
 
-        # Execute tools and append results
-        results = execute_tool_calls(tool_calls)
-        for r in results:
-            content = json.dumps(r.result) if r.success else f"ERROR: {r.error}"
-            ctx = ctx.with_message(
-                Message(role=Role.TOOL, content=content, tool_call_id=r.tool_call_id)
-            )
-            logger.debug("[%s] tool %s → %s", config.name, r.name, "ok" if r.success else "error")
+        tool_messages = _execute_tool_calls(response.tool_calls)
+        intermediate_steps.extend([
+            {"tool": tc["name"], "args": tc["args"]}
+            for tc in response.tool_calls
+        ])
+        messages.extend(tool_messages)
 
-    logger.warning("[%s] reached max iterations (%d)", config.name, config.max_iterations)
-    return AgentResult.fail(
-        error=f"Max iterations ({config.max_iterations}) reached without a final answer.",
-        context=ctx,
-    )
+    logger.warning("[%s] reached max iterations", config.name)
+    return AgentResult.fail(f"Max iterations ({config.max_iterations}) reached without a final answer.")

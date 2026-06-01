@@ -1,58 +1,34 @@
 """
-Examples showing how to use Agent Smith.
+Examples for Agent Smith (LangChain edition).
 Requires a running Ollama instance: https://ollama.com
 """
 
-from agent_smith import (
-    OllamaConfig,
-    Step,
-    run,
-    run_orchestrator,
-    run_sequential,
-    run_web_search,
-    run_code,
-    run_parallel,
-)
+import sys
 
+from agent_smith import OllamaConfig, Step, run, run_code, run_sequential, run_web_search, run_parallel
+from agent_smith.agents.builtins import web_search_agent
 
-# ─── 1. Simplest possible usage ───────────────────────────────────────────────
 
 def example_simple():
     result = run("What is optical interferometry?", agent="web_search")
-    if result.success:
-        print(result.output)
-    else:
-        print(f"Failed: {result.error}")
+    print(result.output if result.success else f"Failed: {result.error}")
 
-
-# ─── 2. Custom model ──────────────────────────────────────────────────────────
-
-def example_custom_model():
-    llm = OllamaConfig(model="mistral", temperature=0.3)
-    result = run_web_search("Latest advances in VLBI interferometry", llm=llm)
-    print(result.output)
-
-
-# ─── 3. Code agent ────────────────────────────────────────────────────────────
 
 def example_code():
     result = run_code(
         "Write a Python function that computes the Fourier transform of a signal "
-        "and plots the frequency spectrum. Use numpy and matplotlib."
+        "and plots its frequency spectrum using numpy."
     )
     print(result.output)
 
 
-# ─── 4. Sequential workflow ───────────────────────────────────────────────────
-
-def example_sequential_workflow():
-    llm = OllamaConfig(model="llama3.2")
-
+def example_sequential():
+    llm = OllamaConfig(model="mistral:latest", temperature=0.3)
     steps = [
         Step(
             name="research",
-            agent=__import__("agent_smith.agents.builtins", fromlist=["web_search_agent"]).web_search_agent(llm),
-            task_fn=lambda _: "Research the Michelson interferometer: how does it work?",
+            agent=web_search_agent(llm),
+            task_fn=lambda _: "How does a Michelson interferometer work?",
         ),
         Step(
             name="code",
@@ -63,72 +39,36 @@ def example_sequential_workflow():
             ),
         ),
     ]
-
-    workflow = run_sequential(steps)
-
-    for name, result in workflow.steps.items():
-        status = "✓" if result.success else "✗"
-        print(f"\n[{status}] {name}")
+    wf = run_sequential(steps)
+    for name, result in wf.steps.items():
+        print(f"\n{'✓' if result.success else '✗'} {name}")
         print(result.output or result.error)
 
 
-# ─── 5. Parallel workflow ─────────────────────────────────────────────────────
-
 def example_parallel():
-    from agent_smith.agents.builtins import web_search_agent
-    llm = OllamaConfig(model="llama3.2")
-
+    llm = OllamaConfig(model="mistral:latest")
     steps = [
-        Step(
-            name="history",
-            agent=web_search_agent(llm),
-            task_fn=lambda _: "History of interferometry",
-        ),
-        Step(
-            name="applications",
-            agent=web_search_agent(llm),
-            task_fn=lambda _: "Modern applications of interferometry",
-        ),
-        Step(
-            name="ligo",
-            agent=web_search_agent(llm),
-            task_fn=lambda _: "How does LIGO use laser interferometry to detect gravitational waves?",
-        ),
+        Step("history",      web_search_agent(llm), lambda _: "History of interferometry"),
+        Step("applications", web_search_agent(llm), lambda _: "Modern applications of interferometry"),
+        Step("ligo",         web_search_agent(llm), lambda _: "How does LIGO detect gravitational waves?"),
     ]
-
-    workflow = run_parallel(steps, max_workers=3)
-
-    for name, result in workflow.steps.items():
+    wf = run_parallel(steps, max_workers=3)
+    for name, result in wf.steps.items():
         print(f"\n=== {name} ===")
         print(result.output if result.success else f"Error: {result.error}")
 
 
-# ─── 6. Orchestrator ─────────────────────────────────────────────────────────
-
-def example_orchestrator():
-    result = run_orchestrator(
-        "Research optical coherence tomography, then write a Python simulation "
-        "that demonstrates the basic principle of low-coherence interferometry."
-    )
-    print(result.output)
-
-
 if __name__ == "__main__":
-    import sys
     examples = {
         "simple": example_simple,
-        "model": example_custom_model,
         "code": example_code,
-        "sequential": example_sequential_workflow,
+        "sequential": example_sequential,
         "parallel": example_parallel,
-        "orchestrator": example_orchestrator,
     }
-
     name = sys.argv[1] if len(sys.argv) > 1 else "simple"
     fn = examples.get(name)
     if fn is None:
-        print(f"Unknown example. Choose from: {list(examples.keys())}")
+        print(f"Choose from: {list(examples.keys())}")
         sys.exit(1)
-
-    print(f"Running example: {name}\n{'─' * 40}")
+    print(f"Running: {name}\n{'─' * 40}")
     fn()
