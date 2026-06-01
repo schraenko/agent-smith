@@ -32,39 +32,17 @@ from agent_smith.tools.registry import tool
     },
 )
 def web_search(query: str, max_results: int = 5) -> list[dict]:
-    """
-    Uses DuckDuckGo Instant Answer API (no key required).
-    For production, replace with a proper Search API.
-    """
     try:
-        with httpx.Client(timeout=10) as client:
-            response = client.get(
-                "https://api.duckduckgo.com/",
-                params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
-            )
-            response.raise_for_status()
-            data = response.json()
-
+        from ddgs import DDGS
         results = []
-
-        # Abstract
-        if data.get("Abstract"):
-            results.append({
-                "title": data.get("Heading", ""),
-                "url": data.get("AbstractURL", ""),
-                "snippet": data["Abstract"],
-            })
-
-        # Related topics
-        for topic in data.get("RelatedTopics", [])[:max_results]:
-            if "Text" in topic:
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
                 results.append({
-                    "title": topic.get("Text", "")[:80],
-                    "url": topic.get("FirstURL", ""),
-                    "snippet": topic.get("Text", ""),
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": r.get("body", ""),
                 })
-
-        return results[:max_results] or [{"title": "No results", "url": "", "snippet": f"No results found for: {query}"}]
+        return results or [{"title": "No results", "url": "", "snippet": f"No results found for: {query}"}]
     except Exception as e:
         return [{"title": "Search error", "url": "", "snippet": str(e)}]
 
