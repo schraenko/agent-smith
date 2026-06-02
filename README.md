@@ -5,6 +5,10 @@ An evolving agent system build on langchain/langgraph
 
 **agent-smith** is a modular, extensible framework for building agentic workflows and autonomous agents across diverse functional domains. It provides the infrastructure, orchestration primitives, and a growing library of pre-built agents — so you can focus on what your agents *do*, not on how to wire them together. Take care. We haven't took the red pill yet! It's just the beginning.
 
+<span style="color: red">
+Keep in mind that this code is for learning, experimenting and demonstrating purpose nonly! 
+Don't use it for production scenarios. Never use it for use cases where security is an issue!
+</span>
 ---
 
 ## What is agent-smith?
