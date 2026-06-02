@@ -13,6 +13,7 @@ def example_simple():
     result = run("What is optical interferometry?", agent="web_search")
     print(result.output if result.success else f"Failed: {result.error}")
 
+   
 
 def example_code():
     result = run_code(

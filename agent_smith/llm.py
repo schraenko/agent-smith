@@ -14,7 +14,7 @@ from langchain_ollama import ChatOllama
 class OllamaConfig:
     model: str = "mistral:latest"
     base_url: str = "http://localhost:11434"
-    temperature: float = 0.7
+    temperature: float = 0.0
     max_tokens: int = 4096
     timeout: int = 120
     options: dict[str, Any] = field(default_factory=dict)

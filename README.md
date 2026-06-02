@@ -87,21 +87,19 @@ print(result)
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────┐
-│              AgentSmith Core            │
-│  ┌──────────────┐  ┌─────────────────┐  │
-│  │ Orchestrator │  │  Tool Registry  │  │
-│  └──────┬───────┘  └────────┬────────┘  │
-│         │                   │           │
-│  ┌──────▼───────────────────▼────────┐  │
-│  │           Agent Runtime           │  │
-│  └──────┬──────────────┬─────────────┘  │
-│         │              │                │
-│  ┌──────▼──────┐ ┌─────▼──────┐        │
-│  │   Memory    │ │  LLM Layer │        │
-│  └─────────────┘ └────────────┘        │
-└─────────────────────────────────────────┘
+Hier ist das Diagramm der AgentSmith Core-Komponenten:
+
+```mermaid
+flowchart TD
+    subgraph AgentSmith Core
+        direction TB
+        Orchestrator --> AgentRuntime
+        ToolRegistry --> AgentRuntime
+        AgentRuntime --> Memory
+        AgentRuntime --> LLM_Layer
+    end
+
+    style AgentSmith Core fill\:none,stroke\:none
 ```
 
 ---
