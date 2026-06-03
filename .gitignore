@@ -51,6 +51,9 @@ htmlcov/
 *.swp
 *.swo
 
+# OpenCode local config
+opencode.jsonc
+
 # Logs
 *.log
 logs/
