@@ -12,7 +12,7 @@ def delegate_to(agent: str, task: str) -> str:
     Delegate a subtask to a specialist agent.
     Available agents: WebSearchAgent, CodeExecutionAgent, DocumentAgent, APIAgent, DataAgent.
     """
-    from agent_smith.agents.builtins import (
+    from agent_smith_lc.agents.builtins import (
         run_api, run_code, run_data, run_document, run_web_search,
     )
 

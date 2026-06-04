@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent_smith.llm import OllamaConfig, make_llm, make_llm_with_tools
-from agent_smith.tools.builtins import TOOL_MAP, get_tools
-from agent_smith.types import AgentResult
+from agent_smith_lc.llm import OllamaConfig, make_llm, make_llm_with_tools
+from agent_smith_lc.tools.builtins import TOOL_MAP, get_tools
+from agent_smith_lc.types import AgentResult
 
 logger = logging.getLogger(__name__)
 

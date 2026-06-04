@@ -3,9 +3,9 @@ Built-in agents.
 Each agent is a pre-configured AgentConfig + a convenience run_* function.
 """
 
-from agent_smith.agents.runner import AgentConfig, run_agent
-from agent_smith.llm import OllamaConfig
-from agent_smith.types import AgentResult
+from agent_smith_lc.agents.runner import AgentConfig, run_agent
+from agent_smith_lc.llm import OllamaConfig
+from agent_smith_lc.types import AgentResult
 
 
 # ─── Web Search Agent ─────────────────────────────────────────────────────────

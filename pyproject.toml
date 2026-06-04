@@ -7,7 +7,7 @@ name = "agent-smith"
 version = "0.1.0"
 description = "Modular agentic workflows powered by LangChain + Ollama"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
     "langchain>=1.0.0",
@@ -22,7 +22,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0"]
 
+[tool.setuptools.packages.find]
+include = ["agent_smith*"]
+exclude = ["tests*"]
+
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests_lc", "tests_vanilla"]
 log_cli = true
 log_cli_level = "WARNING"

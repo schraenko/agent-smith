@@ -8,12 +8,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent_smith.agents.runner import AgentConfig, _trim, run_agent
-from agent_smith.llm import OllamaConfig
-from agent_smith.memory.store import last_assistant_text
-from agent_smith.tools.builtins import execute_python, get_tools, read_file
-from agent_smith.types import AgentResult
-from agent_smith.workflows.engine import Step, run_sequential
+from agent_smith_lc.agents.runner import AgentConfig, _trim, run_agent
+from agent_smith_lc.llm import OllamaConfig
+from agent_smith_lc.memory.store import last_assistant_text
+from agent_smith_lc.tools.builtins import execute_python, get_tools, read_file
+from agent_smith_lc.types import AgentResult
+from agent_smith_lc.workflows.engine import Step, run_sequential
 
 
 # ─── Types ────────────────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ def _config(tools=None):
     )
 
 
-@patch("agent_smith.agents.runner.make_llm")
+@patch("agent_smith_lc.agents.runner.make_llm")
 def test_run_agent_simple(mock_make_llm):
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = AIMessage(content="42", tool_calls=[])
@@ -95,7 +95,7 @@ def test_run_agent_simple(mock_make_llm):
     assert result.success and result.output == "42"
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
+@patch("agent_smith_lc.agents.runner.make_llm_with_tools")
 def test_run_agent_tool_call(mock_make_llm_wt):
     tc = {"id": "1", "name": "execute_python", "args": {"code": "print(2)"}}
     mock_llm = MagicMock()
@@ -108,7 +108,7 @@ def test_run_agent_tool_call(mock_make_llm_wt):
     assert result.success and "2" in result.output
 
 
-@patch("agent_smith.agents.runner.make_llm")
+@patch("agent_smith_lc.agents.runner.make_llm")
 def test_run_agent_llm_failure(mock_make_llm):
     mock_llm = MagicMock()
     mock_llm.invoke.side_effect = Exception("Ollama unavailable")
@@ -117,7 +117,7 @@ def test_run_agent_llm_failure(mock_make_llm):
     assert not result.success and "Ollama unavailable" in result.error
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
+@patch("agent_smith_lc.agents.runner.make_llm_with_tools")
 def test_run_agent_max_iterations(mock_make_llm_wt):
     tc = {"id": "1", "name": "execute_python", "args": {"code": "pass"}}
     mock_llm = MagicMock()
@@ -133,7 +133,7 @@ def test_run_agent_max_iterations(mock_make_llm_wt):
 
 # ─── Workflows ────────────────────────────────────────────────────────────────
 
-@patch("agent_smith.agents.runner.make_llm")
+@patch("agent_smith_lc.agents.runner.make_llm")
 def test_sequential_workflow(mock_make_llm):
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = AIMessage(content="done", tool_calls=[])
@@ -147,7 +147,7 @@ def test_sequential_workflow(mock_make_llm):
     assert wf.success and "step1" in wf.steps and "step2" in wf.steps
 
 
-@patch("agent_smith.agents.runner.make_llm")
+@patch("agent_smith_lc.agents.runner.make_llm")
 def test_sequential_stops_on_failure(mock_make_llm):
     mock_llm = MagicMock()
     mock_llm.invoke.side_effect = Exception("LLM down")

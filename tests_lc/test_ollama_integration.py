@@ -9,7 +9,7 @@ Run with:
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent_smith.llm import OllamaConfig, make_llm
+from agent_smith_lc.llm import OllamaConfig, make_llm
 
 
 @pytest.fixture

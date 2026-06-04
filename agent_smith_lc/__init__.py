@@ -1,11 +1,11 @@
-from agent_smith.agents.runner import AgentConfig, run_agent
-from agent_smith.agents.builtins import (
+from agent_smith_lc.agents.runner import AgentConfig, run_agent
+from agent_smith_lc.agents.builtins import (
     run_web_search, run_code, run_document,
     run_api, run_data, run_orchestrator,
 )
-from agent_smith.llm import OllamaConfig
-from agent_smith.types import AgentResult
-from agent_smith.workflows.engine import Step, WorkflowResult, run_sequential, run_parallel
+from agent_smith_lc.llm import OllamaConfig
+from agent_smith_lc.types import AgentResult
+from agent_smith_lc.workflows.engine import Step, WorkflowResult, run_sequential, run_parallel
 
 _AGENT_MAP = {
     "web_search": run_web_search,
@@ -20,7 +20,7 @@ _AGENT_MAP = {
 def run(
     task: str,
     agent: str = "orchestrator",
-    model: str = "mistral:latest",
+    model: str = "phi4:latest",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
     """
