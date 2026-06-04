@@ -7,7 +7,18 @@ import sys
 
 from agent_smith import OllamaConfig, Step, run, run_code, run_sequential, run_web_search, run_parallel
 from agent_smith.agents.builtins import web_search_agent
+from agent_smith.llm import make_llm, make_llm_with_tools
 
+def ask_llm(question:String):
+    # Create an instance of the LLM
+    config = OllamaConfig()
+    llm = make_llm(config)
+
+    # Send the question to the LLM and get a response
+    response = llm.invoke(question)
+
+    # Print out the response
+    print(response)
 
 def example_simple():
     result = run("What is optical interferometry?", agent="web_search")
@@ -64,12 +75,14 @@ if __name__ == "__main__":
         "simple": example_simple,
         "code": example_code,
         "sequential": example_sequential,
-        "parallel": example_parallel,
+        "parallel": example_parallel
     }
-    name = sys.argv[1] if len(sys.argv) > 1 else "simple"
+
+    name = sys.argv[1] if len(sys.argv) > 1 else None
     fn = examples.get(name)
-    if fn is None:
-        print(f"Choose from: {list(examples.keys())}")
-        sys.exit(1)
-    print(f"Running: {name}\n{'─' * 40}")
-    fn()
+
+    if fn is not None:
+        print(f"Running: {name}\n{'─' * 40}")
+        fn()
+    elif name:
+        print("Error: Unknown example:", name)

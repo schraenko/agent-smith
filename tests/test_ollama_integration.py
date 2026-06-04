@@ -14,7 +14,7 @@ from agent_smith.llm import OllamaConfig, make_llm
 
 @pytest.fixture
 def llm():
-    return make_llm(OllamaConfig(model="phi4:latest", temperature=0.0))
+    return make_llm(OllamaConfig(model="mistral:latest", temperature=0.0))
 
 
 def test_simple_completion(llm):
