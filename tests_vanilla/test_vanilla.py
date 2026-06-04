@@ -8,12 +8,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_smith.agents.runner import AgentConfig, run_agent
-from agent_smith.llm.ollama import OllamaConfig
-from agent_smith.memory.store import MemoryStore, empty_store, window
-from agent_smith.tools.registry import execute_tool_call, get_tool, tool
-from agent_smith.types import AgentContext, Message, Role, ToolCall
-from agent_smith.workflows.engine import Step, run_sequential
+from agent_smith_vanilla.agents.runner import AgentConfig, run_agent
+from agent_smith_vanilla.llm.ollama import OllamaConfig
+from agent_smith_vanilla.memory.store import MemoryStore, empty_store, window
+from agent_smith_vanilla.tools.registry import execute_tool_call, get_tool, tool
+from agent_smith_vanilla.types import AgentContext, Message, Role, ToolCall
+from agent_smith_vanilla.workflows.engine import Step, run_sequential
 
 
 # ─── Types ────────────────────────────────────────────────────────────────────
@@ -103,21 +103,21 @@ def test_tool_execution_unknown():
 
 
 def test_execute_python_tool():
-    from agent_smith.tools.builtins import execute_python
+    from agent_smith_vanilla.tools.builtins import execute_python
     result = execute_python("print(1 + 1)")
     assert result["returncode"] == 0
     assert "2" in result["stdout"]
 
 
 def test_execute_python_error():
-    from agent_smith.tools.builtins import execute_python
+    from agent_smith_vanilla.tools.builtins import execute_python
     result = execute_python("raise ValueError('oops')")
     assert result["returncode"] != 0
     assert "oops" in result["stderr"]
 
 
 def test_read_file_tool(tmp_path):
-    from agent_smith.tools.builtins import read_file
+    from agent_smith_vanilla.tools.builtins import read_file
     f = tmp_path / "test.txt"
     f.write_text("hello world")
     result = read_file(str(f))
@@ -136,7 +136,7 @@ def _make_config(tools=None):
     )
 
 
-@patch("agent_smith.agents.runner.complete")
+@patch("agent_smith_vanilla.agents.runner.complete")
 def test_run_agent_simple(mock_complete):
     mock_complete.return_value = ("The answer is 42.", [])
     config = _make_config()
@@ -145,7 +145,7 @@ def test_run_agent_simple(mock_complete):
     assert result.output == "The answer is 42."
 
 
-@patch("agent_smith.agents.runner.complete")
+@patch("agent_smith_vanilla.agents.runner.complete")
 def test_run_agent_with_tool_call(mock_complete):
     tool_call = ToolCall(id="1", name="test_add", arguments={"a": 1, "b": 2})
     # First call returns tool use, second returns final text
@@ -159,7 +159,7 @@ def test_run_agent_with_tool_call(mock_complete):
     assert "3" in result.output
 
 
-@patch("agent_smith.agents.runner.complete")
+@patch("agent_smith_vanilla.agents.runner.complete")
 def test_run_agent_max_iterations(mock_complete):
     # Always returns a tool call → should hit max_iterations
     tool_call = ToolCall(id="1", name="test_add", arguments={"a": 1, "b": 1})
@@ -178,7 +178,7 @@ def test_run_agent_max_iterations(mock_complete):
 
 # ─── Workflows ────────────────────────────────────────────────────────────────
 
-@patch("agent_smith.agents.runner.complete")
+@patch("agent_smith_vanilla.agents.runner.complete")
 def test_sequential_workflow(mock_complete):
     mock_complete.return_value = ("done", [])
     config = _make_config()
@@ -194,7 +194,7 @@ def test_sequential_workflow(mock_complete):
     assert "step2" in workflow.steps
 
 
-@patch("agent_smith.agents.runner.complete")
+@patch("agent_smith_vanilla.agents.runner.complete")
 def test_sequential_stops_on_failure(mock_complete):
     mock_complete.side_effect = Exception("LLM unavailable")
     config = _make_config()

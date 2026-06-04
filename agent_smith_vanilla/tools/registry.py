@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any, Callable
 
-from agent_smith.types import Tool, ToolCall, ToolResult
+from agent_smith_vanilla.types import Tool, ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 

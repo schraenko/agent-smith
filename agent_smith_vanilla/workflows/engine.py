@@ -9,8 +9,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from agent_smith.agents.runner import AgentConfig, run_agent
-from agent_smith.types import AgentContext, AgentResult, Status
+from agent_smith_vanilla.agents.runner import AgentConfig, run_agent
+from agent_smith_vanilla.types import AgentContext, AgentResult, Status
 
 logger = logging.getLogger(__name__)
 

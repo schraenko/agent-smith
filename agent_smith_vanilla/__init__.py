@@ -3,16 +3,16 @@ Agent Smith — modular agentic workflows for Ollama.
 
 Quick start:
 
-    from agent_smith import run, run_orchestrator, OllamaConfig
+    from agent_smith_vanilla import run, run_orchestrator, OllamaConfig
 
     result = run("Explain the Michelson-Morley experiment", agent="web_search")
     print(result.output)
 """
 
 # Trigger tool registration
-import agent_smith.tools.builtins  # noqa: F401
+import agent_smith_vanilla.tools.builtins  # noqa: F401
 
-from agent_smith.agents.builtins import (
+from agent_smith_vanilla.agents.builtins import (
     run_api,
     run_code,
     run_data,
@@ -20,12 +20,12 @@ from agent_smith.agents.builtins import (
     run_orchestrator,
     run_web_search,
 )
-from agent_smith.agents.runner import AgentConfig, run_agent
-from agent_smith.llm.ollama import OllamaConfig, list_models
-from agent_smith.memory.store import MemoryStore, empty_store
-from agent_smith.tools.registry import get_tools, tool
-from agent_smith.types import AgentContext, AgentResult, Message, Role, Status
-from agent_smith.workflows.engine import Step, WorkflowResult, run_parallel, run_sequential
+from agent_smith_vanilla.agents.runner import AgentConfig, run_agent
+from agent_smith_vanilla.llm.ollama import OllamaConfig, list_models
+from agent_smith_vanilla.memory.store import MemoryStore, empty_store
+from agent_smith_vanilla.tools.registry import get_tools, tool
+from agent_smith_vanilla.types import AgentContext, AgentResult, Message, Role, Status
+from agent_smith_vanilla.workflows.engine import Step, WorkflowResult, run_parallel, run_sequential
 
 _AGENT_MAP = {
     "web_search": run_web_search,

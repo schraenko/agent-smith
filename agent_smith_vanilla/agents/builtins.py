@@ -5,9 +5,9 @@ Each agent is a pre-configured AgentConfig + a convenience run_* function.
 
 from dataclasses import dataclass, field
 
-from agent_smith.agents.runner import AgentConfig, run_agent
-from agent_smith.llm.ollama import OllamaConfig
-from agent_smith.types import AgentContext, AgentResult
+from agent_smith_vanilla.agents.runner import AgentConfig, run_agent
+from agent_smith_vanilla.llm.ollama import OllamaConfig
+from agent_smith_vanilla.types import AgentContext, AgentResult
 
 
 # ─── Web Search Agent ────────────────────────────────────────────────────────

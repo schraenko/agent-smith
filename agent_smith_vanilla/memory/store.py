@@ -7,7 +7,7 @@ Both are pure functions operating on immutable data.
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_smith.types import Message, Role
+from agent_smith_vanilla.types import Message, Role
 
 
 @dataclass(frozen=True)

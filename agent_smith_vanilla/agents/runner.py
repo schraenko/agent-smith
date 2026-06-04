@@ -9,10 +9,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_smith.llm.ollama import OllamaConfig, complete
-from agent_smith.memory.store import window
-from agent_smith.tools.registry import execute_tool_calls, get_tools
-from agent_smith.types import (
+from agent_smith_vanilla.llm.ollama import OllamaConfig, complete
+from agent_smith_vanilla.memory.store import window
+from agent_smith_vanilla.tools.registry import execute_tool_calls, get_tools
+from agent_smith_vanilla.types import (
     AgentContext,
     AgentResult,
     Message,

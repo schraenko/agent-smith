@@ -70,7 +70,7 @@ pip install agent-smith
 ```
 
 ```python
-from agent_smith import AgentSmith, WebSearchAgent, OrchestratorAgent
+from agent_smith_vanilla import AgentSmith, WebSearchAgent, OrchestratorAgent
 
 smith = AgentSmith()
 

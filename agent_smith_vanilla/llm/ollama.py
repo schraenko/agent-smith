@@ -9,7 +9,7 @@ import json
 import logging
 import httpx
 
-from agent_smith.types import Message, Role, Tool, ToolCall
+from agent_smith_vanilla.types import Message, Role, Tool, ToolCall
 
 logger = logging.getLogger(__name__)
 

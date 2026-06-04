@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from agent_smith.tools.registry import tool
+from agent_smith_vanilla.tools.registry import tool
 
 
 # ─── Web Search ───────────────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ def describe_data(path: str) -> dict:
 )
 def delegate_to(agent: str, task: str) -> str:
     # Import here to avoid circular imports
-    from agent_smith.agents.builtins import (
+    from agent_smith_vanilla.agents.builtins import (
         run_api,
         run_code,
         run_data,
