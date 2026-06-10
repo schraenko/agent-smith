@@ -2,10 +2,12 @@
 Examples for Agent Smith (CrewAI edition).
 Requires a running Ollama instance: https://ollama.com
 
+Build:
+    podman build -f Dockerfile.crewai -t agent-smith-crewai .
+
 Usage:
-    source .venv-crewai/bin/activate
-    python examples/basic_usage_crewai.py web_search
-    python examples/basic_usage_crewai.py code
+    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-crewai examples/basic_usage_crewai.py web_search
+    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-crewai examples/basic_usage_crewai.py code
 """
 
 import sys

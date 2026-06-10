@@ -2,12 +2,14 @@
 Examples for Agent Smith (LangChain edition).
 Requires a running Ollama instance: https://ollama.com
 
+Build:
+    podman build -f Dockerfile.lc -t agent-smith-lc .
+
 Usage:
-    source .venv-lc/bin/activate
-    python examples/basic_usage_lc.py web_search
-    python examples/basic_usage_lc.py code
-    python examples/basic_usage_lc.py sequential
-    python examples/basic_usage_lc.py parallel
+    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py web_search
+    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py code
+    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py sequential
+    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py parallel
 """
 
 import sys
