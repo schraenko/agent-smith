@@ -1,0 +1,33 @@
+services:
+  vanilla:
+    build:
+      context: .
+      dockerfile: Dockerfile.vanilla
+    volumes:
+      - .:/workspace
+    environment:
+      - PYTHONPATH=/workspace
+    working_dir: /workspace
+    entrypoint: ["python"]
+
+  lc:
+    build:
+      context: .
+      dockerfile: Dockerfile.lc
+    volumes:
+      - .:/workspace
+    environment:
+      - PYTHONPATH=/workspace
+    working_dir: /workspace
+    entrypoint: ["python"]
+
+  crewai:
+    build:
+      context: .
+      dockerfile: Dockerfile.crewai
+    volumes:
+      - .:/workspace
+    environment:
+      - PYTHONPATH=/workspace
+    working_dir: /workspace
+    entrypoint: ["python"]
