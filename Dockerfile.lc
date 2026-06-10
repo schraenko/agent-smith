@@ -9,3 +9,4 @@ RUN pip install \
     httpx pandas ddgs pytest
 
 WORKDIR /workspace
+ENTRYPOINT ["python"]

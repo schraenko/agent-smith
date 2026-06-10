@@ -5,9 +5,9 @@ Requires a running Ollama instance: https://ollama.com
 Build:
     podman build -f Dockerfile.crewai -t agent-smith-crewai .
 
-Usage:
-    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-crewai examples/basic_usage_crewai.py web_search
-    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-crewai examples/basic_usage_crewai.py code
+Usage (from repo root, uses $PWD for absolute volume path):
+    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-crewai examples/basic_usage_crewai.py web_search
+    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-crewai examples/basic_usage_crewai.py code
 """
 
 import sys

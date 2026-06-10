@@ -5,11 +5,11 @@ Requires a running Ollama instance: https://ollama.com
 Build:
     podman build -f Dockerfile.vanilla -t agent-smith-vanilla .
 
-Usage:
-    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py web_search
-    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py code
-    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py sequential
-    podman run --rm -v .:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py parallel
+Usage (from repo root, uses $PWD for absolute volume path):
+    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py web_search
+    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py code
+    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py sequential
+    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-vanilla examples/basic_usage_vanilla.py parallel
 """
 
 import sys

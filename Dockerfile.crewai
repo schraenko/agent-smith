@@ -6,3 +6,4 @@ RUN pip install "setuptools<82"
 RUN pip install pytest
 
 WORKDIR /workspace
+ENTRYPOINT ["python"]
