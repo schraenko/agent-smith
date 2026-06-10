@@ -1,6 +1,11 @@
 """
 Examples for Agent Smith (CrewAI edition).
 Requires a running Ollama instance: https://ollama.com
+
+Usage:
+    source .venv-crewai/bin/activate
+    python examples/basic_usage_crewai.py web_search
+    python examples/basic_usage_crewai.py code
 """
 
 import sys

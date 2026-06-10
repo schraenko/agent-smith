@@ -1,6 +1,13 @@
 """
 Examples for Agent Smith (Vanilla edition).
 Requires a running Ollama instance: https://ollama.com
+
+Usage:
+    source .venv-vanilla/bin/activate
+    python examples/basic_usage_vanilla.py web_search
+    python examples/basic_usage_vanilla.py code
+    python examples/basic_usage_vanilla.py sequential
+    python examples/basic_usage_vanilla.py parallel
 """
 
 import sys

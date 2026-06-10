@@ -1,6 +1,13 @@
 """
 Examples for Agent Smith (LangChain edition).
 Requires a running Ollama instance: https://ollama.com
+
+Usage:
+    source .venv-lc/bin/activate
+    python examples/basic_usage_lc.py web_search
+    python examples/basic_usage_lc.py code
+    python examples/basic_usage_lc.py sequential
+    python examples/basic_usage_lc.py parallel
 """
 
 import sys
