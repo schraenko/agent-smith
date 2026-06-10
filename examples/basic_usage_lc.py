@@ -6,10 +6,18 @@ Build:
     podman build -f Dockerfile.lc -t agent-smith-lc .
 
 Usage (from repo root, uses $PWD for absolute volume path):
-    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py web_search
-    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py code
-    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py sequential
-    podman run --rm -v $PWD:/workspace -e PYTHONPATH=/workspace agent-smith-lc examples/basic_usage_lc.py parallel
+    podman run --rm --add-host host.containers.internal:host-gateway \
+      -v $PWD:/workspace -e PYTHONPATH=/workspace -e OLLAMA_HOST=http://host.containers.internal:11434 \
+      agent-smith-lc examples/basic_usage_lc.py web_search
+    podman run --rm --add-host host.containers.internal:host-gateway \
+      -v $PWD:/workspace -e PYTHONPATH=/workspace -e OLLAMA_HOST=http://host.containers.internal:11434 \
+      agent-smith-lc examples/basic_usage_lc.py code
+    podman run --rm --add-host host.containers.internal:host-gateway \
+      -v $PWD:/workspace -e PYTHONPATH=/workspace -e OLLAMA_HOST=http://host.containers.internal:11434 \
+      agent-smith-lc examples/basic_usage_lc.py sequential
+    podman run --rm --add-host host.containers.internal:host-gateway \
+      -v $PWD:/workspace -e PYTHONPATH=/workspace -e OLLAMA_HOST=http://host.containers.internal:11434 \
+      agent-smith-lc examples/basic_usage_lc.py parallel
 """
 
 import sys

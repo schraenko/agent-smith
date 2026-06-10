@@ -3,6 +3,7 @@ Ollama LLM backend.
 Pure functions — take config + messages, return a string or tool calls.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 import json
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class OllamaConfig:
     model: str = "phi4:latest"
-    base_url: str = "http://localhost:11434"
+    base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))
     temperature: float = 0.7
     max_tokens: int = 4096
     timeout: int = 120

@@ -1,3 +1,10 @@
+x-ollama: &ollama
+  extra_hosts:
+    - "host.containers.internal:host-gateway"
+  environment:
+    - OLLAMA_HOST=http://host.containers.internal:11434
+    - PYTHONPATH=/workspace
+
 services:
   vanilla:
     build:
@@ -5,8 +12,7 @@ services:
       dockerfile: Dockerfile.vanilla
     volumes:
       - .:/workspace
-    environment:
-      - PYTHONPATH=/workspace
+    <<: *ollama
     working_dir: /workspace
     entrypoint: ["python"]
 
@@ -16,8 +22,7 @@ services:
       dockerfile: Dockerfile.lc
     volumes:
       - .:/workspace
-    environment:
-      - PYTHONPATH=/workspace
+    <<: *ollama
     working_dir: /workspace
     entrypoint: ["python"]
 
@@ -27,7 +32,6 @@ services:
       dockerfile: Dockerfile.crewai
     volumes:
       - .:/workspace
-    environment:
-      - PYTHONPATH=/workspace
+    <<: *ollama
     working_dir: /workspace
     entrypoint: ["python"]
