@@ -16,10 +16,14 @@ CrewAI requires `langchain>=0.1.0,<0.2.0` which conflicts with the LC edition's 
 # Vanilla (zero LangChain)
 python -m venv .venv-vanilla && source .venv-vanilla/bin/activate
 pip install -e "./agent_smith_vanilla[dev]"
+# Workaround: setuptools 82+ generates broken editable .pth files on Python 3.14.
+# Manually write the correct .pth file pointing to the repo root.
+echo "$(cd .. && pwd)" > "$(dirname $(which python))/../lib/python3.14/site-packages/agent_smith_vanilla.pth"
 
 # LangChain
 python -m venv .venv-lc && source .venv-lc/bin/activate
 pip install -e "./agent_smith_lc[dev]"
+echo "$(pwd)" > ".venv-lc/lib/python3.14/site-packages/agent_smith_lc.pth"
 
 # CrewAI (separate venv, uses crewai's built-in Ollama support)
 python -m venv .venv-crewai && source .venv-crewai/bin/activate
@@ -32,6 +36,11 @@ pip install "langchain-community>=0.0.38,<0.1" "langchain-text-splitters>=0.0.1,
 pip install "numpy>=1,<2" "SQLAlchemy>=1.4,<3" "docstring-parser>=0.16"
 pip install "openai>=1.7.1,<2.0.0" "instructor>=0.5.2,<0.6.0" "regex>=2023.12.25,<2024.0.0" "pydantic>=2.4.2,<3.0.0"
 pip install -e "./agent_smith_crewai[dev]" --no-deps
+echo "$(pwd)" > ".venv-crewai/lib/python3.14/site-packages/agent_smith_crewai.pth"
+
+# Note: setuptools 82+ on Python 3.14 generates __editable__ .pth files that point
+# to the package directory (e.g. agent_smith_lc/) instead of the repo root.
+# The manual .pth files above override this by adding the repo root to sys.path.
 ```
 
 ## Commands
