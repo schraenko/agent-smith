@@ -20,7 +20,7 @@ _AGENT_MAP = {
 def run(
     task: str,
     agent: str = "orchestrator",
-    model: str = "mistral:latest",
+    model: str = "phi4:latest",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
     """
