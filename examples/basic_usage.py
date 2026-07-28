@@ -5,8 +5,12 @@ Requires a running Ollama instance: https://ollama.com
 
 import sys
 
-from agent_smith import OllamaConfig, Step, run, run_code, run_sequential, run_web_search, run_parallel
+from agent_smith import (
+    ApprovalDecision, OllamaConfig, Plan, Step,
+    run, run_code, run_interactive, run_sequential, run_web_search, run_parallel,
+)
 from agent_smith.agents.builtins import web_search_agent
+from agent_smith.approval import Subtask
 from agent_smith.llm import make_llm, make_llm_with_tools
 
 def ask_llm(question:String):
@@ -70,12 +74,106 @@ def example_parallel():
         print(result.output if result.success else f"Error: {result.error}")
 
 
+# ─── Human-in-the-Loop ───────────────────────────────────────────────────────
+
+# HITL_TASK = (
+#     "Recherchiere die aktuellen Fortschritte in der Quantencomputing-Forschung und fasse die wichtigsten Erkenntnisse in 3 Saetzen zusammen."
+# )
+
+HITL_TASK = ("ermittle die strecke von nussloch nach bruchsal und berechne den kraftstoffverbrauch für ein fahrzeug mit 7 liter verbrauch auf 100km")
+
+def _print_plan(plan: Plan) -> None:
+    print("\n" + "=" * 60)
+    print(plan.format())
+    print("=" * 60)
+
+
+def example_hitl():
+    print("example_hitl()\n")
+    """Default: CLI-Prompt mit y/n Genehmigung."""
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        _print_plan(plan)
+        answer = input("\nPlan genehmigen? (y/n): ").strip().lower()
+        if answer == "y":
+            return ApprovalDecision(approved=True, feedback="ok")
+        feedback = input("Feedback (optional): ").strip() or None
+        return ApprovalDecision(approved=False, feedback=feedback)
+
+    result = run_interactive(HITL_TASK, approval_callback)
+    print("\n=== Ergebnis ===")
+    if result.success:
+        print(result.output)
+    else:
+        print(f"Abgebrochen: {result.error}")
+
+
+def example_hitl_auto_reject():
+    """Plan wird automatisch abgelehnt — demonstriert den Error-Pfad."""
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        _print_plan(plan)
+        print("\n[Demo] Plan wird automatisch abgelehnt.")
+        return ApprovalDecision(approved=False, feedback="Demo: manueller Abbruch")
+
+    result = run_interactive(HITL_TASK, approval_callback)
+    print("\n=== Ergebnis ===")
+    if result.success:
+        print(result.output)
+    else:
+        print(f"Abgebrochen: {result.error}")
+
+
+def example_hitl_edit():
+    """User kann einzelne Subtasks vor der Ausführung streichen."""
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        _print_plan(plan)
+        kept: list[Subtask] = []
+        for i, subtask in enumerate(plan.subtasks, 1):
+            keep = input(f"  Subtask {i} [{subtask.agent}]: ausführen? (y/n): ").strip().lower()
+            if keep == "y":
+                kept.append(subtask)
+
+        if not kept:
+            return ApprovalDecision(approved=False, feedback="Alle Subtasks gestrichen")
+
+        edited = Plan(subtasks=kept, reasoning=plan.reasoning + " (editiert)")
+        print(f"\nUrsprünglich: {len(plan.subtasks)} Subtasks → {len(kept)} behalten.")
+        return ApprovalDecision(approved=True, feedback=str(edited.to_json()))
+
+    result = run_interactive(HITL_TASK, approval_callback)
+    print("\n=== Ergebnis ===")
+    if result.success:
+        print(result.output)
+    else:
+        print(f"Abgebrochen: {result.error}")
+
+
+def example_hitl_audit():
+    """Zeigt nach der Ausführung den vollstaendigen Audit-Trail."""
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        _print_plan(plan)
+        return ApprovalDecision(approved=True, feedback="ok")
+
+    result = run_interactive(HITL_TASK, approval_callback)
+    print("\n=== Ergebnis ===")
+    if result.success:
+        print(result.output)
+    else:
+        print(f"Abgebrochen: {result.error}")
+
+    print("\n=== Audit-Trail ===")
+    print(result.audit_trail.format())
+
+
 if __name__ == "__main__":
     examples = {
         "simple": example_simple,
         "code": example_code,
         "sequential": example_sequential,
-        "parallel": example_parallel
+        "parallel": example_parallel,
+        "hitl": example_hitl,
+        "hitl-auto-reject": example_hitl_auto_reject,
+        "hitl-edit": example_hitl_edit,
+        "hitl-audit": example_hitl_audit,
     }
 
     name = sys.argv[1] if len(sys.argv) > 1 else None

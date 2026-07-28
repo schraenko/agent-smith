@@ -1,14 +1,14 @@
 # agent-smith
-An evolving agent system build on langchain/langgraph
+
+A modular agent framework built on LangChain for Ollama-based LLMs.
 
 > *"The Matrix cannot tell you who you are."*
 
 **agent-smith** is a modular, extensible framework for building agentic workflows and autonomous agents across diverse functional domains. It provides the infrastructure, orchestration primitives, and a growing library of pre-built agents — so you can focus on what your agents *do*, not on how to wire them together. Take care. We haven't took the red pill yet! It's just the beginning.
 
-<span style="color: red">
-Keep in mind that this code is for learning, experimenting and demonstrating purpose nonly! 
-Don't use it for production scenarios. Never use it for use cases where security is an issue!
-</span>
+> **Note:** This code is for learning, experimenting and demonstrating purposes only!
+> Don't use it for production scenarios. Never use it for use cases where security is an issue!
+
 ---
 
 ## What is agent-smith?
@@ -18,7 +18,7 @@ agent-smith enables you to:
 - **Compose complex workflows** from simple, reusable agent building blocks
 - **Deploy specialized agents** for tasks like data retrieval, code execution, document processing, web search, API interaction, and more
 - **Orchestrate multi-agent pipelines** where agents collaborate, delegate, and hand off work to each other
-- **Integrate with any LLM backend** — bring your own model or use the defaults
+- **Track every step** with built-in audit trails for full observability
 
 Whether you need a single autonomous agent or a network of cooperating agents tackling a multi-step problem, Agent Smith gives you the scaffolding to build it.
 
@@ -29,10 +29,10 @@ Whether you need a single autonomous agent or a network of cooperating agents ta
 - **Modular agent architecture** — every agent is self-contained and composable
 - **Workflow orchestration** — define sequential, parallel, or conditional agent pipelines
 - **Tool use & function calling** — agents can use tools, call APIs, and interact with external systems
-- **Memory & context management** — short-term and long-term memory abstractions out of the box
+- **Audit trail** — full observability of every LLM call, tool invocation, and delegation
 - **Extensible agent library** — add your own agents or use the built-in ones
-- **LLM-agnostic** — works with OpenAI, Anthropic, local models, and any OpenAI-compatible API
-- **Observability** — built-in logging and tracing for every agent step
+- **Ollama-only** — works with any Ollama-compatible model (default: qwen3:8b)
+- **MCP Server support** — mock data servers for testing and prototyping
 
 ---
 
@@ -45,61 +45,97 @@ Whether you need a single autonomous agent or a network of cooperating agents ta
 | `DocumentAgent` | Reads, summarizes, and extracts information from documents |
 | `APIAgent` | Calls REST APIs and processes responses |
 | `DataAgent` | Queries, transforms, and analyzes structured data |
-| `OrchestratorAgent` | Coordinates other agents to solve complex multi-step tasks |
+| `OrchestratorAgent` | Coordinates other agents via delegation to solve complex multi-step tasks |
+
+---
+
+## Quickstart
+
+### Installation
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Basic Usage
+
+```python
+from agent_smith import run
+
+# Simple task with a specific agent
+result = run("What is the capital of France?", agent="web_search")
+print(result.output)
+
+# Complex task with orchestrator
+result = run("Research and summarize: What is agent-smith?")
+print(result.output)
+
+# View the full audit trail
+print(result.audit_trail.format())
+```
+
+### Ollama Setup
+
+You need a running Ollama instance with a model that supports tool use.
+The default model is `qwen3:8b`.
+
+```bash
+# Pull the default model
+ollama pull qwen3:8b
+
+# Or use any other tool-capable model
+ollama pull mistral:latest
+```
+
+---
+
+## MCP Server
+
+agent-smith includes a mock MCP server for testing:
+
+```bash
+# Start the rain sensor mock server
+python mcp_servers/rain_sensor/server.py
+# Server runs on http://localhost:8080/sse
+```
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_all_sensors()` | All 6 sensors with random data |
+| `get_sensor(sensor_id)` | Single sensor by ID |
+| `get_rain_level()` | Average/min/max across all sensors |
+| `get_alerts(threshold)` | Sensors above threshold |
 
 ---
 
 ## Dependencies
-```bash
-pip install -r requirements.txt
-pip install --upgrade setuptools
-pip install -e .
+
 ```
-
-**You need a model that supports tool use!**
-The default model used is *Mistral:latest* with ollama.
-You can easily pull it with
-```bash
-ollama pull mistral:latest 
-```
-
-## Quickstart
-
-```bash
-pip install agent-smith
-```
-
-```python
-from agent_smith import AgentSmith, WebSearchAgent, OrchestratorAgent
-
-smith = AgentSmith()
-
-# Register agents
-smith.register(WebSearchAgent())
-smith.register(OrchestratorAgent())
-
-# Run a workflow
-result = smith.run("Research the latest developments in optical interferometry and write a summary.")
-print(result)
+langchain>=1.0.0
+langchain-ollama>=0.3.0
+langchain-core>=0.3.0
+httpx>=0.27.0
+pandas>=2.0.0
+ddgs>=7.0.0
+mcp[cli]>=1.27
 ```
 
 ---
 
-## Architecture
+## Tests
 
-Hier ist das Diagramm der AgentSmith Core-Komponenten:
+```bash
+# Unit tests (mocked, no Ollama needed)
+python -m pytest tests/
 
-```mermaid
-flowchart TD
-    subgraph AgentSmith Core
-        direction TB
-        Orchestrator --> AgentRuntime
-        ToolRegistry --> AgentRuntime
-        AgentRuntime --> Memory
-        AgentRuntime --> LLM_Layer
-    end
+# Integration tests (needs Ollama + qwen3:8b)
+python -m pytest tests/test_ollama_integration.py -v -s
 
-    style AgentSmith Core fill\:none,stroke\:none
+# With coverage
+python -m pytest --cov=agent_smith
 ```
 
 ---
@@ -117,15 +153,9 @@ Please make sure your code is well-documented and includes tests.
 
 ---
 
-## Run tests
-```
-
-
----
-
 ## License
 
-Copyright (c) 2026 [Your Name]
+Copyright (c) 2026
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

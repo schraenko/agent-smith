@@ -1,5 +1,5 @@
 ---
-name: lc-architecture
+name: architecture
 description: Architektur und Konventionen der LangChain Edition von agent-smith
 metadata:
   edition: langchain
@@ -8,7 +8,7 @@ metadata:
 
 ## Was ich bin
 
-Dieser Skill enthält die vollständige Architektur-Dokumentation der LangChain Edition (`agent_smith/`) von agent-smith. Er wird von den spezialisierten Agenten (lc-coder, lc-tester, lc-reviewer, lc-architect) genutzt.
+Dieser Skill enthält die vollständige Architektur-Dokumentation der LangChain Edition (`agent_smith/`) von agent-smith. Er wird von den spezialisierten Agenten (coder, tester, reviewer, architect) genutzt.
 
 ## Wann ich verwendet werden soll
 

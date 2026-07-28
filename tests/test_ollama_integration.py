@@ -1,6 +1,6 @@
 """
 Integration test — makes a real HTTP call to Ollama.
-Requires a running Ollama instance with phi4:latest pulled.
+Requires a running Ollama instance with qwen3:8b pulled.
 
 Run with:
     python -m pytest tests/test_ollama_integration.py -v -s
@@ -14,7 +14,7 @@ from agent_smith.llm import OllamaConfig, make_llm
 
 @pytest.fixture
 def llm():
-    return make_llm(OllamaConfig(model="mistral:latest", temperature=0.0))
+    return make_llm(OllamaConfig(model="qwen3:8b", temperature=0.0))
 
 
 def test_simple_completion(llm):

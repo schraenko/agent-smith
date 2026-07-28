@@ -47,4 +47,7 @@ def load_rule(name: str) -> dict:
     text = path.read_text(encoding="utf-8")
     config, body = _parse_frontmatter(text)
     config["system_prompt"] = body
+    # Normalize single-string tools to list
+    if "tools" in config and isinstance(config["tools"], str):
+        config["tools"] = [config["tools"]]
     return config
