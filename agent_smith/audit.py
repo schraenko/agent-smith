@@ -43,7 +43,10 @@ class AuditEntry:
     timestamp: str
     level: int
     agent: str
-    action: str  # "llm_call" | "tool_call" | "tool_result" | "delegate" | "delegate_result" | "plan_submitted" | "plan_approved" | "plan_rejected"
+    action: str
+    # "llm_call" | "tool_call" | "tool_result" | "delegate" | "delegate_result"
+    # | "plan_submitted" | "plan_approved" | "plan_rejected"
+    # | "mcp_call" | "mcp_call_result"
     task: str | None = None
     tool_name: str | None = None
     args: dict | None = None
@@ -93,6 +96,13 @@ class AuditTrail:
             print(f"{indent}{prefix} PLAN REJECTED", file=sys.stderr)
             if entry.task:
                 print(f"{indent}    Feedback: {entry.task}", file=sys.stderr)
+        elif entry.action == "mcp_call":
+            print(f"{indent}{prefix} MCP CALL: {entry.agent}.{entry.tool_name}({entry.args})", file=sys.stderr)
+        elif entry.action == "mcp_call_result":
+            status = "OK" if entry.success else "FAILED"
+            print(f"{indent}{prefix} MCP RESULT [{status}] from {entry.agent}.{entry.tool_name}", file=sys.stderr)
+            result_preview = (entry.result or "")[:80]
+            print(f"{indent}    Output: {result_preview}...", file=sys.stderr)
 
     def format(self) -> str:
         lines = []
@@ -121,5 +131,13 @@ class AuditTrail:
             elif e.action == "plan_rejected":
                 lines.append(f"{indent}    Plan rejected by user")
                 lines.append(f"{indent}    Feedback: {e.task or ''}")
+            elif e.action == "mcp_call":
+                lines.append(f"{indent}    Server: {e.agent}")
+                lines.append(f"{indent}    Tool: {e.tool_name}")
+                lines.append(f"{indent}    Args: {e.args}")
+            elif e.action == "mcp_call_result":
+                status = "OK" if e.success else "FAILED"
+                lines.append(f"{indent}    Status: {status}")
+                lines.append(f"{indent}    Output: {(e.result or '')[:100]}")
             lines.append("")
         return "\n".join(lines)

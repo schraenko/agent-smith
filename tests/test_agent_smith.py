@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent_smith.agents.runner import AgentConfig, _trim, run_agent, _parse_tool_calls_from_text
+from agent_smith.agents.runner import AgentConfig, _trim, run_agent
 from agent_smith.llm import OllamaConfig
 from agent_smith.memory.store import last_assistant_text
 from agent_smith.tools.builtins import execute_python, get_tools, read_file
@@ -159,79 +159,3 @@ def test_sequential_stops_on_failure(mock_make_llm):
     ]
     wf = run_sequential(steps)
     assert not wf.success and "step2" not in wf.steps
-
-
-# ─── Fallback Tool Call Parsing ────────────────────────────────────────────────
-
-def test_parse_tool_calls_from_xml():
-    text = '<tool_call>{"name": "execute_python", "args": {"code": "print(1)"}}</tool_call>'
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "execute_python"
-    assert calls[0]["args"]["code"] == "print(1)"
-
-
-def test_parse_tool_calls_from_json():
-    text = '{"name": "read_file", "args": {"path": "/tmp/test.txt"}}'
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "read_file"
-    assert calls[0]["args"]["path"] == "/tmp/test.txt"
-
-
-def test_parse_tool_calls_from_nested_json():
-    text = '{"name": "execute_python", "args": {"code": "def add(a, b):\\n    return a + b\\n\\nresult = add(1, 2)\\nprint(result)"}}'
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "execute_python"
-    assert "def add(a, b):" in calls[0]["args"]["code"]
-
-
-def test_parse_tool_calls_from_python_function():
-    text = 'delegate_to(WebSearchAgent, "What is the capital city of France?")'
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "delegate_to"
-    assert calls[0]["args"]["agent"] == "WebSearchAgent"
-    assert calls[0]["args"]["task"] == "What is the capital city of France?"
-
-
-def test_parse_tool_calls_from_python_function_with_label():
-    text = '''Delegate_to call:
-```
-delegate_to(WebSearchAgent, "What is the capital city of France?")
-```
-Explanation: The WebSearchAgent can perform a web search.'''
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "delegate_to"
-    assert calls[0]["args"]["agent"] == "WebSearchAgent"
-    assert "capital city of France" in calls[0]["args"]["task"]
-
-
-def test_parse_multiple_tool_calls():
-    text = """<tool_call>
-{"name": "execute_python", "args": {"code": "print(1)"}}
-</tool_call>
-<tool_call>
-{"name": "read_file", "args": {"path": "/tmp/test.txt"}}
-</tool_call>"""
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 2
-    assert calls[0]["name"] == "execute_python"
-    assert calls[1]["name"] == "read_file"
-
-
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_run_agent_with_text_tool_calls(mock_make_llm_wt):
-    """Test that tool calls parsed from text are executed."""
-    # Simulate Ollama outputting tool calls as text
-    text_with_tool_calls = '<tool_call>{"name": "execute_python", "args": {"code": "print(42)"}}</tool_call>'
-    mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = [
-        AIMessage(content=text_with_tool_calls, tool_calls=[]),
-        AIMessage(content="42", tool_calls=[]),
-    ]
-    mock_make_llm_wt.return_value = mock_llm
-    result = run_agent("compute", _config(tools=["execute_python"]))
-    assert result.success and "42" in result.output

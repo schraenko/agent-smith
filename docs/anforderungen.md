@@ -138,7 +138,7 @@ Werkzeugen (Tools) automatisiert bearbeitet werden.
 | FR-039 | Die `OllamaConfig` Soll folgende Parameter unterstuetzen: model, base_url, temperature, max_tokens, timeout, options. | hoch |
 | FR-040 | Die Funktion `make_llm(config)` Soll eine `ChatOllama`-Instanz aus einer `OllamaConfig` erzeugen. | hoch |
 | FR-041 | Die Funktion `make_llm_with_tools(config, tools)` Soll eine `ChatOllama`-Instanz mit gebundenen Tools zurueckgeben. | hoch |
-| FR-042 | Das Standard-Modell Soll `qwen3:8b` sein. | mittel |
+| FR-042 | Das Standard-Modell Soll `gemma4:12b` sein. | mittel |
 
 ### 3.7 Oeffentliche API
 

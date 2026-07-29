@@ -164,6 +164,66 @@ def example_hitl_audit():
     print(result.audit_trail.format())
 
 
+# ─── MCP-Routing-Map (deterministische Tools) ────────────────────────────────
+
+def example_mcp_routing():
+    """MCP-Routing-Map: Orchestrator waehlt deterministisch osm_router fuer Routen."""
+    from agent_smith.mcp_routing import find_routing, list_routes
+
+    print("Aktive Routing-Eintraege:")
+    for r in list_routes():
+        print(f"  {r['task_type']:20s} -> {r['mcp_server']}.{r['tool_name']}")
+    print()
+
+    task = "Wie ist die Entfernung von Berlin nach Hamburg?"
+    route = find_routing(task)
+    print(f"Task:  {task}")
+    print(f"Match: {route.task_type if route else 'kein Match'}")
+    print()
+
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        print("\nPlan-Vorschlag:")
+        print(plan.format())
+        return ApprovalDecision(approved=True)
+
+    result = run_interactive(task, approval_callback)
+    print("\n=== Ergebnis ===")
+    print(result.output)
+    print("\n=== Audit (nur MCP-Calls) ===")
+    for entry in result.audit_trail.entries:
+        if entry.action in ("mcp_call", "mcp_call_result"):
+            print(f"  [{entry.action}] {entry.agent}.{entry.tool_name}")
+
+
+def example_mcp_weather():
+    """MCP-Routing-Map: Wetterabfrage via weather-MCP-Server."""
+    task = "Was ist das Wetter in Berlin?"
+
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        print(plan.format())
+        return ApprovalDecision(approved=True)
+
+    result = run_interactive(task, approval_callback)
+    print(result.output)
+
+
+def example_mcp_fallback():
+    """MCP-Routing-Map: Kein Match -> Orchestrator nutzt Standard-Agents."""
+    from agent_smith.mcp_routing import find_routing
+
+    task = "Was ist Python?"
+    route = find_routing(task)
+    print(f"Task:  {task}")
+    print(f"Match: {route.task_type if route else 'kein Match (Fallback zu Standard-Agents)'}")
+
+    def approval_callback(plan: Plan) -> ApprovalDecision:
+        print(plan.format())
+        return ApprovalDecision(approved=True)
+
+    result = run_interactive(task, approval_callback)
+    print(result.output)
+
+
 if __name__ == "__main__":
     examples = {
         "simple": example_simple,
@@ -174,6 +234,9 @@ if __name__ == "__main__":
         "hitl-auto-reject": example_hitl_auto_reject,
         "hitl-edit": example_hitl_edit,
         "hitl-audit": example_hitl_audit,
+        "mcp-routing": example_mcp_routing,
+        "mcp-weather": example_mcp_weather,
+        "mcp-fallback": example_mcp_fallback,
     }
 
     name = sys.argv[1] if len(sys.argv) > 1 else None

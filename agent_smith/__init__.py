@@ -27,7 +27,7 @@ _AGENT_MAP = {
 def run(
     task: str,
     agent: str = "orchestrator",
-    model: str = "qwen3:8b",
+    model: str = "gemma4:12b",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
     """
@@ -61,7 +61,7 @@ def _load_orchestrator_config(model: str, base_url: str) -> AgentConfig:
 def run_interactive(
     task: str,
     approval_callback: Callable[[Plan], ApprovalDecision],
-    model: str = "qwen3:8b",
+    model: str = "gemma4:12b",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
     """

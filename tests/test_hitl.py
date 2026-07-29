@@ -13,7 +13,6 @@ from langchain_core.messages import AIMessage
 
 from agent_smith.agents.runner import (
     AgentConfig,
-    _parse_tool_calls_from_text,
     run_agent_execute_phase,
     run_agent_plan_phase,
 )
@@ -145,6 +144,46 @@ def test_parse_plan_from_args_structured_no_reasoning():
     assert plan.reasoning == ""
 
 
+def test_submit_plan_accepts_mcp_subtask():
+    """MCP-Subtask im structured Format wird akzeptiert."""
+    args = {
+        "subtasks": [{"mcp_server": "osm_router", "tool_name": "get_route_distance",
+                      "args": {"start": "Berlin", "end": "Hamburg"}}],
+        "reasoning": "Direct MCP call",
+    }
+    result = submit_plan.invoke(args)
+    assert result == PLAN_SUBMITTED_MARKER
+
+
+def test_parse_plan_from_args_mcp_subtask():
+    """parse_plan_from_args with MCP-Subtask."""
+    args = {
+        "subtasks": [{"mcp_server": "weather", "tool_name": "get_weather",
+                      "args": {"location": "Berlin"}}],
+    }
+    plan = parse_plan_from_args(args)
+    assert len(plan.subtasks) == 1
+    assert plan.subtasks[0].is_mcp
+    assert plan.subtasks[0].mcp_server == "weather"
+    assert plan.subtasks[0].tool_name == "get_weather"
+
+
+def test_parse_plan_from_args_mixed_subtasks():
+    """Agent + MCP-Subtasks gemischt."""
+    args = {
+        "subtasks": [
+            {"mcp_server": "weather", "tool_name": "get_weather",
+             "args": {"location": "Berlin"}},
+            {"agent": "WebSearchAgent", "task": "Find hotels in Berlin"},
+        ],
+    }
+    plan = parse_plan_from_args(args)
+    assert len(plan.subtasks) == 2
+    assert plan.subtasks[0].is_mcp
+    assert not plan.subtasks[1].is_mcp
+    assert plan.subtasks[1].agent == "WebSearchAgent"
+
+
 def test_parse_plan_from_args_backward_compat():
     """Old format with plan_json string still works."""
     args = {"plan_json": '{"subtasks": [{"agent": "APIAgent", "task": "GET /x"}]}'}
@@ -229,11 +268,11 @@ def test_plan_phase_rejects_invalid_plan_json(mock_make_llm_wt):
 
 # ─── run_agent_execute_phase ─────────────────────────────────────────────────
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_execute_phase_logs_approval_and_runs(mock_make_llm_wt):
+@patch("agent_smith.agents.runner.make_llm")
+def test_execute_phase_logs_approval_and_runs(mock_make_llm):
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = AIMessage(content="All done.", tool_calls=[])
-    mock_make_llm_wt.return_value = mock_llm
+    mock_make_llm.return_value = mock_llm
 
     plan = Plan(subtasks=[Subtask(agent="WebSearchAgent", task="Search X")])
     result = run_agent_execute_phase("test task", plan, _config())
@@ -246,7 +285,8 @@ def test_execute_phase_logs_approval_and_runs(mock_make_llm_wt):
 # ─── run_interactive ─────────────────────────────────────────────────────────
 
 @patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_run_interactive_approved_executes_plan(mock_make_llm_wt):
+@patch("agent_smith.agents.runner.make_llm")
+def test_run_interactive_approved_executes_plan(mock_make_llm, mock_make_llm_wt):
     plan_json = (
         '{"subtasks": [{"agent": "WebSearchAgent", "task": "Search X"}]}'
     )
@@ -254,15 +294,19 @@ def test_run_interactive_approved_executes_plan(mock_make_llm_wt):
 
     call_count = {"n": 0}
 
-    def llm_side_effect(_msgs):
+    def llm_wt_side_effect(_msgs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return AIMessage(content="", tool_calls=[tc])
         return AIMessage(content="Final answer.", tool_calls=[])
 
-    mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = llm_side_effect
-    mock_make_llm_wt.return_value = mock_llm
+    mock_llm_wt = MagicMock()
+    mock_llm_wt.invoke.side_effect = llm_wt_side_effect
+    mock_make_llm_wt.return_value = mock_llm_wt
+
+    mock_llm_plain = MagicMock()
+    mock_llm_plain.invoke.return_value = AIMessage(content="Final answer.", tool_calls=[])
+    mock_make_llm.return_value = mock_llm_plain
 
     decisions = []
     def callback(plan: Plan) -> ApprovalDecision:
@@ -320,27 +364,3 @@ def test_run_interactive_no_plan_submitted(mock_make_llm_wt):
     assert callback_called["n"] == 0
     assert result.success
     assert result.output == "I'll just do it."
-
-
-# ─── Fallback parser for submit_plan ─────────────────────────────────────────
-
-def test_parse_submit_plan_function_positional():
-    """Qwen3 calls submit_plan as Python-style with positional JSON arg."""
-    text = 'submit_plan(\'{"subtasks": [{"agent": "WebSearchAgent", "task": "X"}]}\')'
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "submit_plan"
-    assert "plan_json" in calls[0]["args"]
-    plan = Plan.from_json(calls[0]["args"]["plan_json"])
-    assert plan.subtasks[0].agent == "WebSearchAgent"
-
-
-def test_parse_submit_plan_function_kwarg():
-    """Qwen3 calls submit_plan with plan_json= kwarg syntax."""
-    text = 'submit_plan(plan_json=\'{"subtasks": [{"agent": "APIAgent", "task": "GET /x"}]}\')'
-    calls = _parse_tool_calls_from_text(text)
-    assert len(calls) == 1
-    assert calls[0]["name"] == "submit_plan"
-    assert "plan_json" in calls[0]["args"]
-    plan = Plan.from_json(calls[0]["args"]["plan_json"])
-    assert plan.subtasks[0].agent == "APIAgent"

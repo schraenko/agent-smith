@@ -31,7 +31,7 @@ Whether you need a single autonomous agent or a network of cooperating agents ta
 - **Tool use & function calling** — agents can use tools, call APIs, and interact with external systems
 - **Audit trail** — full observability of every LLM call, tool invocation, and delegation
 - **Extensible agent library** — add your own agents or use the built-in ones
-- **Ollama-only** — works with any Ollama-compatible model (default: qwen3:8b)
+- **Ollama-only** — works with any Ollama-compatible model (default: gemma4:12b)
 - **MCP Server support** — mock data servers for testing and prototyping
 
 ---
@@ -78,11 +78,11 @@ print(result.audit_trail.format())
 ### Ollama Setup
 
 You need a running Ollama instance with a model that supports tool use.
-The default model is `qwen3:8b`.
+The default model is `gemma4:12b`.
 
 ```bash
 # Pull the default model
-ollama pull qwen3:8b
+ollama pull gemma4:12b
 
 # Or use any other tool-capable model
 ollama pull mistral:latest
@@ -131,7 +131,7 @@ mcp[cli]>=1.27
 # Unit tests (mocked, no Ollama needed)
 python -m pytest tests/
 
-# Integration tests (needs Ollama + qwen3:8b)
+# Integration tests (needs Ollama + gemma4:12b)
 python -m pytest tests/test_ollama_integration.py -v -s
 
 # With coverage

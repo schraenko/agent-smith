@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 
 @dataclass(frozen=True)
 class OllamaConfig:
-    model: str = "qwen3:8b"
+    model: str = "gemma4:12b"
     base_url: str = "http://localhost:11434"
     temperature: float = 0.7
     max_tokens: int = 4096

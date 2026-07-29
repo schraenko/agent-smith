@@ -21,19 +21,27 @@ Dieser Skill enthält die vollständige Architektur-Dokumentation der LangChain 
 
 ```
 agent_smith/
-├── __init__.py              # Package-Eintritt: run(), _AGENT_MAP, Public API
+├── __init__.py              # Package-Eintritt: run(), _AGENT_MAP, run_interactive(), Public API
 ├── pyproject.toml           # Dependencies: langchain>=1.0.0, langchain-ollama
 ├── types.py                 # AgentResult, Status enum (LC-frei)
 ├── rules.py                 # Frontmatter-Parser: rules/*.md → AgentConfig
 ├── llm.py                   # LC-spezifisch: OllamaConfig, make_llm(), make_llm_with_tools()
+├── approval.py              # HITL: Plan, Subtask, ApprovalDecision, _parse_subtask(), VALID_AGENTS
+├── audit.py                 # AuditTrail, AuditEntry + Context-Vars für Observability
+├── mcp_clients.py           # MCP-Dispatcher: call_mcp_tool(), list_servers() — silent-fail + Fallback-String
+├── mcp_routing.py           # Routing Map: deterministisches Keyword-Matching für MCP-Subtasks
 ├── agents/
 │   ├── __init__.py          # Re-exports
-│   ├── runner.py            # Agentic Loop: AgentConfig, _trim(), run_agent()
+│   ├── runner.py            # Agentic Loop: AgentConfig, _trim(), run_agent(),
+│   │                        #   run_agent_plan_phase(), run_agent_execute_phase(),
+│   │                        #   _mcp_fallback_agent(), _mcp_fallback_task()
 │   └── builtins.py          # 6 Agents: _agent_from_rule() + run_* convenience
 ├── tools/
-│   ├── __init__.py          # Re-exports + delegate_to Registrierung
+│   ├── __init__.py          # Re-exports + delegate_to + security-tools + submit_plan Registrierung
 │   ├── builtins.py          # 9 @tool-Funktionen + TOOL_MAP, get_tools()
-│   └── delegate.py          # delegate_to @tool (Orchestrator-Delegation)
+│   ├── delegate.py          # delegate_to @tool (Orchestrator-Delegation)
+│   ├── submit_plan.py       # submit_plan @tool + _coerce_subtasks() + parse_plan_from_args()
+│   └── security.py          # bandit_scan, secret_scan, audit_dependencies, security_scan
 ├── memory/
 │   ├── __init__.py
 │   └── store.py             # window(), last_assistant_text()
@@ -182,15 +190,74 @@ def run_conditional(
     ...
 ```
 
+### 7. Human-in-the-Loop + MCP-Integration (`approval.py`, `submit_plan.py`, `runner.py`)
+
+Zweiphasiger HITL-Flow:
+
+**Phase 1 — Planung** (`run_agent_plan_phase`):
+- Orchestrator hat nur `submit_plan` als Tool
+- LLM erzeugt strukturierten Plan mit `submit_plan(reasoning=..., subtasks=[...])`
+- Jeder Subtask ist entweder ein Agent-Subtask (`agent`/`task`) oder MCP-Subtask (`mcp_server`/`tool_name`/`args`)
+- Validierung via `_coerce_subtasks()` in `submit_plan.py`
+
+**Phase 2 — Ausführung** (`run_agent_execute_phase`):
+- MCP-Subtasks werden via `call_mcp_tool()` ausgeführt (synchron, deterministisch)
+- Bei MCP-Fehler → transparenter Fallback auf `WebSearchAgent` via `_mcp_fallback_agent()` + `_mcp_fallback_task()`
+- Agent-Subtasks werden via `_delegate_sync()` an spezialisierte Agents delegiert
+- Finaler LLM-Call kombiniert alle Ergebnisse
+
+### 8. MCP-Routing (`mcp_routing.py`)
+
+Deterministisches Keyword-Matching für Task→MCP-Server-Routing:
+
+- `RoutingEntry`: task_type, mcp_server, tool_name, keywords, description
+- `find_routing(task)` → erster Match oder `None`
+- `render_routes_for_prompt()` → Markdown-Tabelle für System-Prompt
+- Kein LLM involviert, rein deterministisch
+
+**Aktuelle Einträge:**
+| Task Type | MCP Server | Tool | Keywords |
+|---|---|---|---|
+| `route_distance` | `osm_router` | `get_route_distance` | entfernung, distanz |
+| `route_info` | `osm_router` | `get_route_info` | route, wegbeschreibung |
+| `weather` | `weather` | `get_weather` | wetter, temperatur |
+| `weather_forecast` | `weather` | `get_forecast` | vorhersage, forecast, wetter |
+
+### 9. MCP-Client-Dispatcher (`mcp_clients.py`)
+
+`call_mcp_tool(server, tool, args)` → dispatcht synchron an registrierte Python-Clients:
+- `osm_router` → `OSMRouterClient` (OSRM live API + deterministischer Mock)
+- `weather` → `WeatherClient` (deterministischer Mock)
+- Unbekannte Server → `"MCP_ERROR: Unknown server '{server}'"` → löst Fallback aus
+
+### 10. MCP-Server (`mcp_servers/`)
+
+Separate Top-Level-Pakete (nicht in `agent_smith/`), pro Server:
+- `mcp_servers/osm_router/` — FastMCP-Server + synchroner Python-Client
+- `mcp_servers/weather/` — FastMCP-Server + synchroner Python-Client
+- `mcp_servers/rain_sensor/` — Mock-Daten für Tests
+
+**Wichtig:** `mcp_servers` muss via `.pth`-Datei im venv auf `sys.path` sein (siehe AGENTS.md Setup).
+
 ## Import-Abhängigkeiten
 
 ```
 __init__.py
-  └── agents/runner.py       → llm.py (make_llm, make_llm_with_tools)
+  ├── mcp_routing.py         ← standalone, keine Abhängigkeiten
+  ├── mcp_clients.py         → mcp_servers.*.client (lazy import)
+  ├── approval.py            ← standalone: Plan, Subtask, ApprovalDecision
+  ├── audit.py               ← standalone: AuditTrail, AuditEntry
+  ├── tools/submit_plan.py   → approval.py (VALID_AGENTS, Plan, Subtask)
+  ├── agents/runner.py       → llm.py (make_llm, make_llm_with_tools)
   │                           → tools/builtins.py (TOOL_MAP, get_tools)
+  │                           → tools/submit_plan.py (PLAN_SUBMITTED_MARKER, parse_plan_from_args)
+  │                           → mcp_clients.py (call_mcp_tool, lazy import)
+  │                           → approval.py (Plan)
+  │                           → audit.py (AuditTrail, set_audit_context, reset_audit_context)
   │                           → types.py (AgentResult)
-  └── agents/builtins.py     → rules.py (load_rule) → runner.py
-      └── tools/delegate.py  → agents/builtins.py (lazy import)
+  ├── agents/builtins.py     → rules.py (load_rule) → runner.py
+  └── tools/delegate.py      → agents/builtins.py (lazy import)
+  └── tools/__init__.py      → builtins.py + delegate.py + submit_plan.py + security.py
 ```
 
 ## Konventionen
@@ -219,19 +286,21 @@ __init__.py
 ## Bekannte Probleme und geplante Änderungen
 
 ### Kurzfristig (Quick Wins)
-1. **`_trim()` entfernen**: `runner.py` nutzt `memory.store.window()`
+1. **`_trim()` entfernen**: `runner.py` nutzt `memory.store.window()` (dupliziert)
 2. **Tool-Warnung**: `get_tools()` warnt bei unbekannten Tools
 3. **Strukturierte Fehler**: `delegate_to` gibt `{"status": "error", ...}` zurück
+4. **MCP-Fallback ausgebaut**: Fallback unterstützt aktuell nur `osm_router` + `weather` — erweiterbar
 
 ### Mittelfristig
-4. **Zentrale Agent-Registry**: Dynamische Dispatch-Map statt Hardcoding
-5. **`__all__` definieren**: In allen `__init__.py` Dateien
-6. **Testabdeckung erhöhen**: Fehlende Tests implementieren
+5. **Zentrale Agent-Registry**: Dynamische Dispatch-Map statt Hardcoding
+6. **`__all__` definieren**: In allen `__init__.py` Dateien
+7. **Testabdeckung erhöhen**: Fehlende Tests implementieren
+8. **DeepAgents-Migration evaluieren**: Siehe `docs/features_and_ideas.md#deepagents-migration`
 
 ### Langfristig
-7. **Prompt-Engineering**: Detailliertere System-Prompts mit Output-Format
-8. **Dynamisches Context-Window**: Basierend auf Modell-Kontextgröße
-9. **Sandbox für `execute_python`**: Thread-sichere Temp-Verzeichnisse
+9. **Prompt-Engineering**: Detailliertere System-Prompts mit Output-Format
+10. **Dynamisches Context-Window**: Basierend auf Modell-Kontextgröße
+11. **Sandbox für `execute_python`**: Thread-sichere Temp-Verzeichnisse
 
 ## Befehle
 

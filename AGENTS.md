@@ -29,7 +29,7 @@ chmod +x .git/hooks/pre-push               # Pre-Push-Hook aktivieren
 | Command | Action |
 |---|---|
 | `python -m pytest tests/` | Run unit tests (mocked, no Ollama) |
-| `python -m pytest tests/test_ollama_integration.py -v -s` | Integration tests (needs Ollama + `qwen3:8b`) |
+| `python -m pytest tests/test_ollama_integration.py -v -s` | Integration tests (needs Ollama + `gemma4:12b`) |
 | `python -m pytest --cov=agent_smith` | Run with coverage |
 
 ## Architecture
@@ -37,15 +37,19 @@ chmod +x .git/hooks/pre-push               # Pre-Push-Hook aktivieren
 Functional style — no agent classes, no inheritance.
 
 - **Entrypoints:** `agent_smith.run()` or direct `run_web_search()`, `run_code()`, etc.
-- **Agent runner:** `agents/runner.py` — agentic loop with LangChain tool binding
+- **Agent runner:** `agents/runner.py` — agentic loop with LangChain tool binding, plan-phase + execute-phase for HITL, MCP fallback (`_mcp_fallback_agent`, `_mcp_fallback_task`)
 - **Built-in agents:** `agents/builtins.py` — 6 agents (WebSearch, Code, Document, API, Data, Orchestrator)
-- **Tools:** `tools/builtins.py` — 10 tools (web_search, execute_python, read_file, list_files, http_get, http_post, read_csv, describe_data, query_data, delegate_to)
+- **Tools:** `tools/builtins.py` — 9 tools + `delegate_to` + `submit_plan` + 4 security tools
+- **HITL:** `approval.py` (Plan/Subtask dataclasses) + `tools/submit_plan.py` (plan submission + validation)
+- **MCP Routing:** `mcp_routing.py` — deterministic task-to-MCP-server keyword matching
+- **MCP Clients:** `mcp_clients.py` — synchronous dispatcher for osm_router + weather servers
+- **MCP Servers:** `mcp_servers/` — FastMCP servers (osm_router, weather, rain_sensor) with mock fallback
 - **Workflows:** `workflows/engine.py` — `run_sequential`, `run_parallel`, `run_conditional`
 - **Memory:** `memory/store.py` — sliding-window utilities
 - **Types:** `types.py` — `AgentResult` (status/output/error/intermediate_steps/audit_trail)
 - **Audit Trail:** `audit.py` — `AuditEntry`, `AuditTrail` + Context-Vars for full observability
 - **Rules:** `rules/` — Markdown files with YAML frontmatter for agent configuration
-- **MCP Servers:** `mcp_servers/` — Mock data servers (rain_sensor)
+- **Security:** `tools/security.py` — bandit_scan, secret_scan, audit_dependencies, security_scan
 
 ## Key conventions
 
@@ -55,7 +59,9 @@ Functional style — no agent classes, no inheritance.
 - Orchestrator agent delegates via `delegate_to` tool (max 20 iterations); all other agents default to 10.
 - No generated code, no migrations, no build artifacts.
 - Tool calling includes fallback parsing for models that output tool calls as text (e.g., Qwen3 with Ollama).
-- Fallback parsing supports XML tags (`<tool_call>`) and raw JSON tool calls.
+- Fallback parsing supports XML tags (`<tool_call>- Tool calling uses native Ollama tool-calling API (no text fallback needed). Default model: `gemma4:12b`.
+- MCP subtasks transparently fall back to `WebSearchAgent` on failure (osm_router, weather only).
+- `mcp_servers/` must be on `sys.path` (`.pth` workaround in venv — see Setup).
 
 ## OpenCode Agents & Skills
 

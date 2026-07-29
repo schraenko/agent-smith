@@ -196,7 +196,7 @@ Einziges Modul (neben `runner.py`), das `ChatOllama` importiert.
 ```python
 @dataclass(frozen=True)
 class OllamaConfig:
-    model: str = "qwen3:8b"
+    model: str = "gemma4:12b"
     base_url: str = "http://localhost:11434"
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -435,7 +435,7 @@ def submit_plan(
 - Subtasks-Liste darf nicht leer sein
 
 **Zwei akzeptierte Eingabeformate via `parse_plan_from_args`:**
-- `{"subtasks": [...], "reasoning": "..."}` — bevorzugtes Format (Qwen3)
+- `{"subtasks": [...], "reasoning": "..."}` — strukturiertes Format (gemma4:12b)
 - `{"plan_json": "<json string>"}` — Backward-Compat
 
 ### 4.10 [`approval.py`](../agent_smith/approval.py) — HITL-Datentypen
@@ -529,7 +529,7 @@ _Agent_MAP = {
 def run(
     task: str,
     agent: str = "orchestrator",
-    model: str = "qwen3:8b",
+    model: str = "gemma4:12b",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
     """Convenience-Einstiegspunkt."""
@@ -543,7 +543,7 @@ def run(
 def run_interactive(
     task: str,
     approval_callback: Callable[[Plan], ApprovalDecision],
-    model: str = "qwen3:8b",
+    model: str = "gemma4:12b",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
     """
@@ -1005,8 +1005,8 @@ flowchart TD
 ### 12.2 LLM-Backend
 
 - Ollama auf `localhost:11434`
-- Default-Modell: `qwen3:8b`
-- Integrationstests: `qwen3:8b`
+- Default-Modell: `gemma4:12b`
+- Integrationstests: `gemma4:12b`
 
 ### 12.3 Test-Befehle
 

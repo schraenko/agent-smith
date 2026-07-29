@@ -61,7 +61,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama serve
 
 # Ein Modell herunterladen
-ollama pull qwen3:8b
+ollama pull gemma4:12b
 ```
 
 Nach der Installation laeuft Ollama auf `http://localhost:11434`.
@@ -94,8 +94,9 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Alle 16 Unit-Tests sollten gruen sein. Die 3 Integrationstests
-(`test_ollama_integration.py`) benoetigen einen laufenden Ollama-Server.
+Alle 93 Unit-Tests (gemockt, kein Ollama noetig) sollten gruen sein.
+Die 3 Integrationstests (`test_ollama_integration.py`) benoetigen einen
+laufenden Ollama-Server mit dem Modell `gemma4:12b`.
 
 ---
 
@@ -212,7 +213,7 @@ from agent_smith import run_web_search, run_code, OllamaConfig
 result = run_web_search("Was ist Transformers in der Informatik?")
 
 # Anderes Modell verwenden
-llm = OllamaConfig(model="qwen3:8b", temperature=0.3)
+llm = OllamaConfig(model="gemma4:12b", temperature=0.3)
 result = run_code("Schreibe eine Fibonacci-Funktion", llm=llm)
 ```
 
@@ -515,7 +516,7 @@ flowchart LR
 from agent_smith import Step, run_sequential, OllamaConfig
 from agent_smith.agents.builtins import web_search_agent, code_agent
 
-llm = OllamaConfig(model="qwen3:8b")
+llm = OllamaConfig(model="gemma4:12b")
 
 steps = [
     Step(
@@ -815,7 +816,7 @@ class AgentConfig:
 ```python
 @dataclass(frozen=True)
 class OllamaConfig:
-    model: str = "qwen3:8b"                    # Ollama-Modell
+    model: str = "gemma4:12b"                    # Ollama-Modell
     base_url: str = "http://localhost:11434"
     temperature: float = 0.7            # Kreativitaet (0.0-1.0)
     max_tokens: int = 4096              # Maximale Token-Laenge
@@ -925,7 +926,6 @@ def _execute_tool_calls(
     level: int = 0,
     agent_name: str = "",
 ) -> list[ToolMessage]: ...
-def _parse_tool_calls_from_text(text: str) -> list: ...
 
 def run_agent(
     task: str,
@@ -954,9 +954,8 @@ def run_agent_execute_phase(
 > Helper-Funktionen `_trim` (sliding window) und `_execute_tool_calls`
 > (fuehrt Tool-Calls aus und sammelt Ergebnisse), sowie die beiden
 > HITL-Phasen-Funktionen `run_agent_plan_phase` und
-> `run_agent_execute_phase`. Enthaelt zusaetzlich den Fallback-Parser
-> `_parse_tool_calls_from_text` fuer Modelle, die Tool-Calls als Text
-> ausgeben (z.B. Qwen3 + Ollama).
+> `run_agent_execute_phase`. Tool-Calls erfolgen nativ ueber die
+> Ollama Tool-Calling API (kein Text-Fallback mehr noetig).
 
 #### `agent_smith/agents/builtins.py`
 
