@@ -31,19 +31,6 @@ def _coerce_subtasks(value) -> list[Subtask]:
         if not isinstance(item, dict):
             raise ValueError(f"subtasks[{i}] must be an object")
 
-        if "mcp_server" in item or "tool_name" in item:
-            mcp_server = str(item.get("mcp_server", "")).strip()
-            tool_name = str(item.get("tool_name", "")).strip()
-            if not mcp_server or not tool_name:
-                raise ValueError(
-                    f"subtasks[{i}]: MCP subtask needs both 'mcp_server' and 'tool_name'"
-                )
-            args = item.get("args", {})
-            if not isinstance(args, dict):
-                raise ValueError(f"subtasks[{i}]: 'args' must be an object")
-            out.append(Subtask(mcp_server=mcp_server, tool_name=tool_name, args=args))
-            continue
-
         agent = item.get("agent", "").strip()
         task = item.get("task", "").strip()
         if agent not in VALID_AGENTS:
@@ -99,7 +86,7 @@ def submit_plan(
         )
 
     After submission the system will pause and ask the user to approve or
-    reject the plan. Only after approval may delegate_to be called.
+    reject the plan. Only after approval may the `task` tool be called.
     """
     Plan(subtasks=_coerce_subtasks(subtasks), reasoning=reasoning)
     return PLAN_SUBMITTED_MARKER

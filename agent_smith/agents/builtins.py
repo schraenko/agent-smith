@@ -1,13 +1,42 @@
 """
 Built-in agents.
 Each agent is a pre-configured AgentConfig + a convenience run_* function.
+The 5 specialist agents are also exposed as DeepAgents SubAgent dicts for
+use by the orchestrator's built-in `task` tool.
 """
+
+from dataclasses import replace
 
 from agent_smith.agents.runner import AgentConfig, run_agent
 from agent_smith.audit import AuditTrail
 from agent_smith.llm import OllamaConfig
 from agent_smith.rules import load_rule
+from agent_smith.tools.builtins import get_tools
 from agent_smith.types import AgentResult
+
+_SUBAGENT_RULES = ("web_search", "code", "document", "api", "data")
+
+
+def get_subagents() -> list[dict]:
+    """Build DeepAgents SubAgent dicts from the specialist agent rules.
+
+    Each dict has keys: name, description, system_prompt, tools.
+    Tools are resolved to BaseTool instances via `get_tools` so that
+    DeepAgents' `ToolNode` can bind them.
+
+    The `description` is kept short to avoid bloating the auto-generated
+    `task` tool description (which gemma4:12b struggles to parse when long).
+    """
+    subagents = []
+    for rule_name in _SUBAGENT_RULES:
+        cfg = load_rule(rule_name)
+        subagents.append({
+            "name": cfg["name"],
+            "description": cfg["name"],
+            "system_prompt": cfg["system_prompt"],
+            "tools": get_tools(cfg.get("tools") or []),
+        })
+    return subagents
 
 
 def _agent_from_rule(name: str, llm: OllamaConfig | None = None) -> AgentConfig:
@@ -70,7 +99,8 @@ def run_data(task: str, llm: OllamaConfig | None = None, audit_trail: AuditTrail
 # --- Orchestrator Agent ---
 
 def orchestrator_agent(llm: OllamaConfig | None = None) -> AgentConfig:
-    return _agent_from_rule("orchestrator", llm)
+    cfg = _agent_from_rule("orchestrator", llm)
+    return replace(cfg, subagents=get_subagents())
 
 def run_orchestrator(task: str, llm: OllamaConfig | None = None) -> AgentResult:
     return run_agent(task, orchestrator_agent(llm))

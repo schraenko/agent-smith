@@ -1,7 +1,7 @@
 ---
 title: "Anforderungsdokument — agent-smith"
 author: "Marco Schrank"
-date: "2026-07-27"
+date: "2026-07-30"
 tags:
   - anforderungen
   - requirements
@@ -15,8 +15,8 @@ abstract: "Arc42-basiertes Requirements-Dokument für agent-smith (LangChain Edi
 > Arc42-basiertes Requirements-Dokument für agent-smith (LangChain Edition).
 > Formulierungen nach IREB-Konventionen (Soll-Aussagen, eindeutige IDs).
 
-**Version:** 1.1
-**Stand:** 2026-07-28
+**Version:** 1.2
+**Stand:** 2026-07-30
 **Status:** Ist-Zustand (umgesetzte Anforderungen)
 
 ---
@@ -53,6 +53,7 @@ Werkzeugen (Tools) automatisiert bearbeitet werden.
 |---------|-------|-----------|
 | 1.0 | 2026-07-27 | Erstfassung (Ist-Zustand) |
 | 1.1 | 2026-07-28 | Human-in-the-Loop: `run_interactive()`, `submit_plan`-Tool, Plan/ApprovalDecision-Dataclasses |
+| 1.2 | 2026-07-30 | DeepAgents-Migration: SubAgents statt delegate_to, Security-Tools (4), DeepAgents als Kernel |
 
 ---
 
@@ -86,14 +87,14 @@ Werkzeugen (Tools) automatisiert bearbeitet werden.
 
 | ID | Anforderung | Prioritaet |
 |----|-------------|------------|
-| FR-010 | Das System Soll elf Standard-Tools bereitstellen: `web_search`, `execute_python`, `read_file`, `list_files`, `http_get`, `http_post`, `read_csv`, `describe_data`, `query_data`, `delegate_to`, `submit_plan`. | hoch |
+| FR-010 | Das System Soll 12 Tools bereitstellen: 7 Domain-Tools (`web_search`, `execute_python`, `http_get`, `http_post`, `read_csv`, `describe_data`, `query_data`), 4 Security-Tools (`bandit_scan`, `secret_scan`, `audit_dependencies`, `security_scan`), sowie `submit_plan` fuer HITL. Dateisystem-Tools und SubAgent-Delegation werden von DeepAgents built-in bereitgestellt. | hoch |
 | FR-011 | Jedes Tool Soll als mit `@tool` dekorierte Funktion implementiert sein und ein Dict oder eine Liste zurueckgeben. | hoch |
 | FR-012 | Jedes Tool Soll Fehler abfangen und als Dictionary (`{"error": "..."}`) zurueckgeben, ohne Exceptions an den Caller weiterzugeben. | hoch |
 | FR-013 | Das System Soll eine globale Tool-Registry (`ALL_TOOLS`, `TOOL_MAP`) bereitstellen, die Tool-Namen auf Tool-Funktionen mapped. | hoch |
 | FR-014 | Die Funktion `get_tools(names)` Soll Tools nach Name zurueckgeben oder alle Tools, wenn `names=None`. | mittel |
-| FR-015 | Das `delegate_to`-Tool Soll dem OrchestratorAgent die Delegation von Subtasks an die fuenf Specialist-Agenten (WebSearch, Code, Document, API, Data) ermoeglichen. | hoch |
-| FR-016 | Das `delegate_to`-Tool Soll Lazy-Imports nutzen, um zirkulare Abhaengigkeiten zu vermeiden. | mittel |
-| FR-017 | Das `delegate_to`-Tool Soll den Dispatch ueber ein Dictionary realisieren, das Agent-Namen auf Runner-Funktionen mapped. | mittel |
+| FR-015 | Der OrchestratorAgent Soll Subtasks via DeepAgents' built-in `task`-Tool an SubAgents delegieren koennen. Die SubAgents (WebSearch, Code, Document, API, Data) werden ueber `get_subagents()` aus den Rule-Dateien konfiguriert. | hoch |
+| FR-016 | Die SubAgent-Konfiguration Soll automatisch aus den Rule-Dateien generiert werden (kein manuelles Dispatch-Dict). | mittel |
+| FR-017 | Jeder SubAgent Soll in einem isolierten DeepAgents-Kontext laufen (kein Zugriff auf den gesamten Verlauf). | mittel |
 
 ### 3.3 Tool-Details
 
@@ -154,13 +155,13 @@ Werkzeugen (Tools) automatisiert bearbeitet werden.
 | ID | Anforderung | Prioritaet |
 |----|-------------|------------|
 | FR-047 | Das System Soll eine `run_interactive(task, approval_callback)`-Funktion bereitstellen, die den Orchestrator in einem zweiphasigen Flow ausfuehrt: zuerst Plan-Generierung, dann User-Approval, dann Execution. | hoch |
-| FR-048 | Die Plan-Phase Soll ausschliesslich das `submit_plan`-Tool bereitstellen, die Execution-Phase ausschliesslich das `delegate_to`-Tool. | hoch |
+| FR-048 | Die Plan-Phase Soll ausschliesslich das `submit_plan`-Tool bereitstellen (via `interrupt_on`), die Execution-Phase Soll Subtasks deterministisch via `_delegate_sync()` ausfuehren. | hoch |
 | FR-049 | Das `submit_plan`-Tool Soll einen strukturierten Plan mit Feldern `subtasks` (Liste aus `{agent, task}`) und optional `reasoning` (string) entgegennehmen. | hoch |
 | FR-050 | Das System Soll eine `Plan`-Dataclass mit `subtasks: list[Subtask]` und `reasoning: str` sowie `to_json()`/`from_json()`/`format()`-Methoden bereitstellen. | hoch |
 | FR-051 | Das System Soll eine `ApprovalDecision`-Dataclass mit `approved: bool` und optional `feedback: str` bereitstellen. | hoch |
 | FR-052 | Der Approval-Callback Soll einen `Plan` erhalten und eine `ApprovalDecision` zurueckgeben (kein `True/False` direkt). | hoch |
 | FR-053 | Bei `approved=False` Soll das System den Lauf abbrechen und `AgentResult.fail("Plan rejected by user: ...")` zurueckgeben. | hoch |
-| FR-054 | Bei `approved=True` Soll das System den genehmigten Plan via `delegate_to` ausfuehren und das Ergebnis der Subagents kombiniert zurueckgeben. | hoch |
+| FR-054 | Bei `approved=True` Soll das System den genehmigten Plan via `_delegate_sync()` ausfuehren und die Ergebnisse der Subtasks in einem finalen LLM-Call kombinieren. | hoch |
 | FR-055 | Der Plan-Audit-Trail Soll die Actions `plan_submitted`, `plan_approved` und `plan_rejected` enthalten. | mittel |
 
 ### 3.8 Memory
@@ -243,7 +244,7 @@ Werkzeugen (Tools) automatisiert bearbeitet werden.
 Qualitaetsziel
 ├── Funktionale Eignung
 │   ├── Korrektheit: Agenten liefern zutreffende Ergebnisse
-│   ├── Vollstaendigkeit: Alle 6 Agenten und 10 Tools sind implementiert
+│   ├── Vollstaendigkeit: Alle 6 Agenten und 12 Tools sind implementiert
 │   └── Angemessenheit: Tools sind auf ihre Domäne beschraenkt
 ├── Zuverlaessigkeit
 │   ├── Reife: Fehler werden abgefangen und strukturiert zurueckgegeben
@@ -306,7 +307,7 @@ Qualitaetsziel
 | **AgentResult** | Das einheitliche Rueckgabeprotokoll aller Agenten-Aufrufe |
 | **Ollama** | Ein lokaler LLM-Server fuer Open-Source-Modelle |
 | **LangChain** | Ein Framework fuer LLM-Anwendungen, das Tool-Calling und Message-Typen bereitstellt |
-| **Human-in-the-Loop (HITL)** | Flow, bei dem der Orchestrator zuerst einen Plan generiert und der User die Ausfuehrung explizit genehmigen muss, bevor Subtasks via `delegate_to` ausgefuehrt werden |
+| **Human-in-the-Loop (HITL)** | Flow, bei dem der Orchestrator zuerst einen Plan generiert und der User die Ausfuehrung explizit genehmigen muss, bevor Subtasks via `_delegate_sync()` ausgefuehrt werden |
 | **Plan** | Strukturierte Beschreibung der geplanten Subtasks (Liste aus `{agent, task}` plus optional `reasoning`) |
 | **ApprovalDecision** | Ergebnis der User-Bewertung eines Plans (`approved: bool`, optionales `feedback: str`) |
 

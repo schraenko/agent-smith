@@ -56,28 +56,6 @@ def execute_python(code: str, timeout: int = 30) -> dict:
         Path(tmp_path).unlink(missing_ok=True)
 
 
-# ─── File Operations ──────────────────────────────────────────────────────────
-
-@tool
-def read_file(path: str, max_chars: int = 10000) -> dict:
-    """Read the contents of a file from disk."""
-    try:
-        content = Path(path).read_text(encoding="utf-8")
-        truncated = len(content) > max_chars
-        return {"content": content[:max_chars], "truncated": truncated, "total_chars": len(content)}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@tool
-def list_files(path: str = ".", pattern: str = "*") -> list[str]:
-    """List files in a directory matching a glob pattern."""
-    try:
-        return [str(p) for p in Path(path).glob(pattern) if p.is_file()]
-    except Exception as e:
-        return [f"Error: {e}"]
-
-
 # ─── HTTP ─────────────────────────────────────────────────────────────────────
 
 @tool
@@ -154,7 +132,6 @@ def query_data(path: str, query: str, columns: list[str] | None = None) -> dict:
 
 ALL_TOOLS = [
     web_search, execute_python,
-    read_file, list_files,
     http_get, http_post,
     read_csv, describe_data, query_data,
 ]

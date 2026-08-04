@@ -1,20 +1,26 @@
 """
 Core agent runner.
-The agentic loop is a plain function — no Agent class, no inheritance.
-LangChain is used only for the LLM call and message types.
+
+The agentic loop is powered by `deepagents.create_deep_agent` (built on
+LangChain + LangGraph). LangChain/LangGraph types are confined to this module
+and `llm.py`; the rest of the codebase keeps using plain domain types.
+
+Human-in-the-loop uses a direct bind_tools loop for the plan phase (with
+automatic retry if the LLM skips submit_plan) and a deterministic execute
+phase for agent subtask delegation.
 """
 
-import json
 import logging
 from dataclasses import dataclass, field
 
+from deepagents import create_deep_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent_smith.approval import Plan
-from agent_smith.audit import AuditTrail, set_audit_context, reset_audit_context
-from agent_smith.llm import OllamaConfig, make_llm, make_llm_with_tools
-from agent_smith.tools.builtins import TOOL_MAP, get_tools
-from agent_smith.tools.submit_plan import PLAN_SUBMITTED_MARKER, parse_plan_from_args
+from agent_smith.audit import AuditTrail
+from agent_smith.llm import OllamaConfig, make_llm
+from agent_smith.tools.builtins import get_tools
+from agent_smith.tools.submit_plan import parse_plan_from_args
 from agent_smith.types import AgentResult
 
 logger = logging.getLogger(__name__)
@@ -30,6 +36,7 @@ class AgentConfig:
     tools: list[str] | None = None
     max_iterations: int = MAX_ITERATIONS
     context_window: int = 20
+    subagents: list = field(default_factory=list)
 
 
 def _trim(messages: list, max_messages: int) -> list:
@@ -41,89 +48,136 @@ def _trim(messages: list, max_messages: int) -> list:
     return messages[-max_messages:]
 
 
-def _execute_tool_calls(tool_calls: list, audit_trail: AuditTrail | None = None, level: int = 0, agent_name: str = "") -> list[ToolMessage]:
-    """Execute all tool calls and return ToolMessages."""
-    results = []
-    for call in tool_calls:
-        name = call["name"]
-        args = call["args"]
-        tool_fn = TOOL_MAP.get(name)
-        if tool_fn is None:
-            content = json.dumps({"error": f"Unknown tool: {name}"})
-            if audit_trail:
-                audit_trail.log(level=level, agent=agent_name, action="tool_call", tool_name=name, args=args, success=False)
-                audit_trail.log(level=level, agent=agent_name, action="tool_result", tool_name=name, result=content, success=False)
-        else:
-            if audit_trail:
-                audit_trail.log(level=level, agent=agent_name, action="tool_call", tool_name=name, args=args)
-            try:
-                tokens = set_audit_context(audit_trail, level) if audit_trail else None
-                try:
-                    content = json.dumps(tool_fn.invoke(args))
-                finally:
-                    reset_audit_context(tokens) if tokens else None
-                logger.debug("Tool %s -> ok", name)
-                if audit_trail:
-                    audit_trail.log(level=level, agent=agent_name, action="tool_result", tool_name=name, result=content, success=True)
-            except Exception as e:
-                content = json.dumps({"error": str(e)})
-                logger.error("Tool %s failed: %s", name, e)
-                if audit_trail:
-                    audit_trail.log(level=level, agent=agent_name, action="tool_result", tool_name=name, result=content, success=False)
-        results.append(ToolMessage(content=content, tool_call_id=call["id"]))
-    return results
+def _build_deep_agent(config: AgentConfig):
+    """Construct a DeepAgents compiled graph for the given AgentConfig.
+
+    Kept as a thin wrapper so tests can patch `create_deep_agent` at module
+    level without touching config wiring.
+    """
+    llm = make_llm(config.llm)
+    tool_objs = get_tools(config.tools) if config.tools is not None else []
+    return create_deep_agent(
+        model=llm,
+        tools=tool_objs,
+        system_prompt=config.system_prompt,
+        subagents=config.subagents or None,
+    )
+
+
+def _extract_final_output(messages: list) -> str:
+    """Return the content of the last non-empty AIMessage, or '' if none."""
+    for m in reversed(messages):
+        if isinstance(m, AIMessage) and m.content:
+            return m.content if isinstance(m.content, str) else str(m.content)
+    return ""
+
+
+def _collect_tool_steps(messages: list) -> list[dict]:
+    """Collect intermediate ToolMessage steps for AgentResult.intermediate_steps."""
+    steps = []
+    for m in messages:
+        if isinstance(m, ToolMessage):
+            steps.append({"tool": getattr(m, "name", "?"), "content": m.content})
+    return steps
 
 
 def run_agent(task: str, config: AgentConfig, audit_trail: AuditTrail | None = None, level: int = 0) -> AgentResult:
     """
-    Run the agentic loop for a single agent.
+    Run the agentic loop for a single agent via DeepAgents.
 
-    Loop:
-      1. Call LLM with current messages
-      2. If tool calls -> execute -> append results -> repeat
-      3. If text response -> done
+    DeepAgents handles the model loop, tool binding, context management, and
+    built-in filesystem/subagent tools. We map `max_iterations` to a LangGraph
+    recursion limit and record the final AIMessage content as the result.
+
+    For agents with `subagents` configured (e.g. the orchestrator), retries
+    if the LLM answers directly instead of calling the `task` tool (known
+    issue with gemma4:12b — `tool_choice=None` in LangChain's `create_agent`
+    makes tool use optional). At most 3 outer attempts.
     """
     if audit_trail is None:
         audit_trail = AuditTrail()
 
-    tools = get_tools(config.tools) if config.tools is not None else []
-    llm = make_llm_with_tools(config.llm, tools) if tools else make_llm(config.llm)
+    has_subagents = bool(config.subagents)
+    max_outer_attempts = 3 if has_subagents else 1
+    recursion_limit = max(8, config.max_iterations * 2)
+    invoke_config = {"recursion_limit": recursion_limit}
 
-    messages = [
-        SystemMessage(content=config.system_prompt),
-        HumanMessage(content=task),
-    ]
-    intermediate_steps = []
+    try:
+        agent = _build_deep_agent(config)
+    except Exception as e:
+        logger.error("[%s] build deep_agent failed: %s", config.name, e)
+        return AgentResult.fail(str(e), audit_trail=audit_trail)
 
-    for iteration in range(config.max_iterations):
-        logger.info("[%s] iteration %d/%d", config.name, iteration + 1, config.max_iterations)
-        audit_trail.log(level=level, agent=config.name, action="llm_call", iteration=iteration + 1)
+    messages_input: list[dict] = [{"role": "user", "content": task}]
+    last_messages: list = []
 
-        windowed = _trim(messages, config.context_window)
+    for attempt in range(max_outer_attempts):
+        audit_trail.log(
+            level=level, agent=config.name,
+            action="llm_call", iteration=attempt + 1,
+        )
 
         try:
-            response: AIMessage = llm.invoke(windowed)
+            result = agent.invoke(
+                {"messages": messages_input},
+                config=invoke_config,
+            )
         except Exception as e:
-            logger.error("[%s] LLM call failed: %s", config.name, e)
+            logger.error("[%s] deep_agent invoke failed (attempt %d): %s",
+                         config.name, attempt + 1, e)
             return AgentResult.fail(str(e), audit_trail=audit_trail)
 
-        messages.append(response)
+        last_messages = result.get("messages", []) if isinstance(result, dict) else []
 
-        tool_calls = response.tool_calls
+        if not has_subagents or _has_task_delegation(last_messages) or attempt == max_outer_attempts - 1:
+            break
 
-        if not tool_calls:
-            logger.info("[%s] done after %d iterations", config.name, iteration + 1)
-            return AgentResult.ok(output=response.content, steps=intermediate_steps, audit_trail=audit_trail)
+        logger.info(
+            "[%s] attempt %d — no task delegation, retrying",
+            config.name, attempt + 1,
+        )
+        messages_input = _messages_to_input_dicts(last_messages)
+        messages_input.append({
+            "role": "user",
+            "content": (
+                "You must delegate this task to a specialist agent using "
+                "the `task` tool. Do not answer the task directly."
+            ),
+        })
 
-        tool_messages = _execute_tool_calls(tool_calls, audit_trail=audit_trail, level=level, agent_name=config.name)
-        intermediate_steps.extend([
-            {"tool": tc["name"], "args": tc["args"]}
-            for tc in tool_calls
-        ])
-        messages.extend(tool_messages)
+    output = _extract_final_output(last_messages)
+    steps = _collect_tool_steps(last_messages)
 
-    logger.warning("[%s] reached max iterations", config.name)
-    return AgentResult.fail(f"Max iterations ({config.max_iterations}) reached without a final answer.", audit_trail=audit_trail)
+    logger.info("[%s] deep_agent done — %d messages", config.name, len(last_messages))
+    return AgentResult.ok(output=output, steps=steps, audit_trail=audit_trail)
+
+
+def _has_task_delegation(messages: list) -> bool:
+    """Return True if the LLM called the `task` tool (i.e. delegated to a SubAgent)."""
+    for m in messages:
+        if isinstance(m, AIMessage):
+            for tc in (getattr(m, "tool_calls", None) or []):
+                if tc.get("name") == "task":
+                    return True
+    return False
+
+
+def _messages_to_input_dicts(messages: list) -> list[dict]:
+    """Convert graph-state messages back to dicts for the next graph invoke."""
+    out: list[dict] = []
+    for m in messages:
+        if isinstance(m, HumanMessage):
+            out.append({"role": "user", "content": m.content})
+        elif isinstance(m, AIMessage):
+            if m.content:
+                out.append({"role": "assistant", "content": m.content})
+        elif isinstance(m, ToolMessage):
+            out.append({
+                "role": "tool",
+                "content": m.content,
+                "tool_call_id": getattr(m, "tool_call_id", ""),
+            })
+    return out
 
 
 def run_agent_plan_phase(
@@ -135,122 +189,76 @@ def run_agent_plan_phase(
     """
     Phase 1 of the human-in-the-loop flow.
 
-    Runs the agentic loop until `submit_plan` is called, then stops
-    immediately and returns the captured plan. The plan is recovered from
-    the `submit_plan` tool call's `plan_json` argument. Only `submit_plan`
-    is available as a tool in this phase.
+    Uses a direct model loop with bind_tools to force the LLM to call
+    submit_plan. Retries if the LLM answers directly instead of using
+    the tool (known issue with gemma4:12b — tool_choice=None in
+    LangGraph's create_agent makes tool use optional).
     """
     if audit_trail is None:
         audit_trail = AuditTrail()
 
-    from langchain_core.messages import HumanMessage, SystemMessage
+    llm = make_llm(config.llm)
+    tool_objs = get_tools(["submit_plan"])
+    bound_llm = llm.bind_tools(tool_objs)
 
-    tools = get_tools(["submit_plan"])
-    llm = make_llm_with_tools(config.llm, tools)
-
-    messages = [
+    messages: list = [
         SystemMessage(content=config.system_prompt),
         HumanMessage(content=task),
     ]
-    intermediate_steps: list = []
 
-    for iteration in range(config.max_iterations):
-        logger.info("[%s] plan-phase iteration %d/%d", config.name, iteration + 1, config.max_iterations)
-        audit_trail.log(level=level, agent=config.name, action="llm_call", iteration=iteration + 1)
+    max_attempts = max(3, config.max_iterations)
 
-        windowed = _trim(messages, config.context_window)
+    for attempt in range(max_attempts):
+        audit_trail.log(
+            level=level, agent=config.name,
+            action="llm_call", iteration=attempt + 1,
+        )
+
         try:
-            response: AIMessage = llm.invoke(windowed)
+            response = bound_llm.invoke(messages)
         except Exception as e:
-            logger.error("[%s] LLM call failed: %s", config.name, e)
+            logger.error("[%s] plan-phase invoke failed (attempt %d): %s",
+                         config.name, attempt + 1, e)
             return None, AgentResult.fail(str(e), audit_trail=audit_trail)
 
         messages.append(response)
 
-        tool_calls = response.tool_calls
+        if getattr(response, "tool_calls", None):
+            for tc in response.tool_calls:
+                if tc["name"] == "submit_plan":
+                    try:
+                        plan = parse_plan_from_args(tc["args"])
+                    except (ValueError, KeyError, TypeError) as e:
+                        logger.error("[%s] invalid plan submitted: %s",
+                                     config.name, e)
+                        return None, AgentResult.fail(
+                            f"Invalid plan from submit_plan: {e}",
+                            audit_trail=audit_trail,
+                        )
+                    audit_trail.log(
+                        level=level, agent=config.name,
+                        action="plan_submitted", task=plan.to_json(),
+                    )
+                    return plan, AgentResult.ok(
+                        output=plan.to_json(), audit_trail=audit_trail,
+                    )
 
-        if not tool_calls:
-            return None, AgentResult.ok(
-                output=response.content, steps=intermediate_steps, audit_trail=audit_trail
-            )
-
-        plan_call = next((tc for tc in tool_calls if tc["name"] == "submit_plan"), None)
-        if plan_call is not None:
-            try:
-                plan = parse_plan_from_args(plan_call["args"])
-            except (ValueError, KeyError, TypeError) as e:
-                logger.error(
-                    "[%s] invalid plan submitted: %s (args keys: %s)",
-                    config.name, e, list(plan_call["args"].keys()),
-                )
-                return None, AgentResult.fail(
-                    f"Invalid plan JSON from submit_plan: {e}. "
-                    f"Received args keys: {list(plan_call['args'].keys())}",
-                    audit_trail=audit_trail,
-                )
-
-        tool_messages = _execute_tool_calls(
-            tool_calls, audit_trail=audit_trail, level=level, agent_name=config.name
+        logger.info(
+            "[%s] plan-phase attempt %d — no submit_plan, retrying",
+            config.name, attempt + 1,
         )
-        intermediate_steps.extend(
-            {"tool": tc["name"], "args": tc["args"]} for tc in tool_calls
-        )
-        messages.extend(tool_messages)
+        messages.append(HumanMessage(
+            content="You must call submit_plan with a structured list of "
+                    "subtasks. Do NOT answer the task directly."
+        ))
 
-        if plan_call is not None:
-            assert plan is not None
-            audit_trail.log(
-                level=level,
-                agent=config.name,
-                action="plan_submitted",
-                task=plan.to_json(),
-            )
-            return plan, AgentResult.ok(
-                output=plan.to_json(), steps=intermediate_steps, audit_trail=audit_trail
-            )
-
-    logger.warning("[%s] plan-phase reached max iterations without submit_plan", config.name)
-    return None, AgentResult.fail(
-        f"Plan phase reached max iterations ({config.max_iterations}) without a submitted plan.",
-        audit_trail=audit_trail,
+    logger.warning(
+        "[%s] plan-phase ended without submit_plan after %d attempts",
+        config.name, max_attempts,
     )
-
-
-def _mcp_fallback_agent(mcp_server: str, tool_name: str) -> str | None:
-    """Map an MCP server+tool to a fallback agent, or None if no fallback exists."""
-    FALLBACK_MAP: dict[str, dict[str, str]] = {
-        "osm_router": {
-            "get_route_distance": "WebSearchAgent",
-            "get_route_info": "WebSearchAgent",
-        },
-        "weather": {
-            "get_weather": "WebSearchAgent",
-            "get_forecast": "WebSearchAgent",
-        },
-    }
-    return FALLBACK_MAP.get(mcp_server, {}).get(tool_name)
-
-
-def _mcp_fallback_task(tool_name: str, args: dict) -> str:
-    """Build a natural-language task for the fallback agent from MCP args."""
-    if tool_name == "get_route_distance":
-        return (
-            f"Finde die Entfernung von {args.get('start', '?')} "
-            f"nach {args.get('end', '?')} und gib sie in Kilometern an."
-        )
-    if tool_name == "get_route_info":
-        return (
-            f"Finde eine Route von {args.get('start', '?')} "
-            f"nach {args.get('end', '?')} mit detaillierten Schritten."
-        )
-    if tool_name == "get_weather":
-        loc = args.get("location", args.get("plz", "?"))
-        return f"Wie ist das aktuelle Wetter in {loc}?"
-    if tool_name == "get_forecast":
-        loc = args.get("location", "?")
-        days = args.get("days", 3)
-        return f"Wie ist die Wettervorhersage für {loc} für die nächsten {days} Tage?"
-    return f"{tool_name}({args})"
+    return None, AgentResult.ok(
+        output=_extract_final_output(messages), audit_trail=audit_trail,
+    )
 
 
 def run_agent_execute_phase(
@@ -264,9 +272,7 @@ def run_agent_execute_phase(
     Phase 2 of the human-in-the-loop flow.
 
     Executes the approved plan deterministically:
-    - MCP subtasks are dispatched directly to the named server tool.
-    - If an MCP subtask fails, it falls back to a standard agent (WebSearchAgent).
-    - Agent subtasks are dispatched via `delegate_to`.
+    - Agent subtasks are dispatched via `_delegate_sync`.
     - A final LLM call combines the per-subtask results into a natural-language answer.
     """
     if audit_trail is None:
@@ -278,81 +284,27 @@ def run_agent_execute_phase(
         action="plan_approved",
     )
 
-    from agent_smith.mcp_clients import call_mcp_tool
-    from langchain_core.messages import HumanMessage, SystemMessage
-
     subtask_results: list[str] = []
-    has_agent_subtask = False
 
     for i, subtask in enumerate(plan.subtasks, 1):
-        if subtask.is_mcp:
-            audit_trail.log(
-                level=level,
-                agent=subtask.mcp_server,
-                action="mcp_call",
-                tool_name=subtask.tool_name,
-                args=subtask.args,
-            )
-            result = call_mcp_tool(subtask.mcp_server, subtask.tool_name, subtask.args)
-            success = not result.startswith("MCP_ERROR")
-
-            if not success:
-                fallback_agent = _mcp_fallback_agent(subtask.mcp_server, subtask.tool_name)
-                if fallback_agent:
-                    audit_trail.log(
-                        level=level,
-                        agent=config.name,
-                        action="mcp_fallback",
-                        tool_name=subtask.tool_name,
-                        result=f"MCP failed, falling back to {fallback_agent}",
-                        success=False,
-                    )
-                    fallback_task = _mcp_fallback_task(subtask.tool_name, subtask.args)
-                    fallback_result = _delegate_sync(fallback_agent, fallback_task, audit_trail, level)
-                    if "MCP_ERROR" not in fallback_result and "Agent failed" not in fallback_result:
-                        result = fallback_result
-                        success = True
-                        audit_trail.log(
-                            level=level,
-                            agent=config.name,
-                            action="mcp_fallback_result",
-                            tool_name=subtask.tool_name,
-                            result="Fallback succeeded",
-                            success=True,
-                        )
-
-            audit_trail.log(
-                level=level,
-                agent=subtask.mcp_server,
-                action="mcp_call_result",
-                tool_name=subtask.tool_name,
-                result=result,
-                success=success,
-            )
-            subtask_results.append(f"Subtask {i} [MCP:{subtask.mcp_server}.{subtask.tool_name}]:\n{result}")
-        else:
-            has_agent_subtask = True
-            audit_trail.log(
-                level=level,
-                agent=subtask.agent,
-                action="delegate",
-                task=subtask.task,
-            )
-            agent_result = _delegate_sync(subtask.agent, subtask.task, audit_trail, level)
-            audit_trail.log(
-                level=level,
-                agent=subtask.agent,
-                action="delegate_result",
-                result=agent_result,
-                success=True,
-            )
-            subtask_results.append(f"Subtask {i} [{subtask.agent}]:\n{agent_result}")
-
-    if not has_agent_subtask and all(s.is_mcp for s in plan.subtasks):
-        return AgentResult.ok(
-            output="\n\n".join(subtask_results),
-            audit_trail=audit_trail,
+        audit_trail.log(
+            level=level,
+            agent=subtask.agent,
+            action="delegate",
+            task=subtask.task,
         )
+        agent_result = _delegate_sync(subtask.agent, subtask.task, audit_trail, level)
+        audit_trail.log(
+            level=level,
+            agent=subtask.agent,
+            action="delegate_result",
+            result=agent_result,
+            success=True,
+        )
+        subtask_results.append(f"Subtask {i} [{subtask.agent}]:\n{agent_result}")
+
+    if not subtask_results:
+        return AgentResult.ok(output="", audit_trail=audit_trail)
 
     combine_prompt = (
         f"Original task: {task}\n\n"

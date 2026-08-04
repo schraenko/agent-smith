@@ -48,6 +48,7 @@ def run(
 
 def _load_orchestrator_config(model: str, base_url: str) -> AgentConfig:
     cfg = load_rule("orchestrator")
+    from agent_smith.agents.builtins import get_subagents
     return AgentConfig(
         name=cfg["name"],
         system_prompt=cfg["system_prompt"],
@@ -55,6 +56,7 @@ def _load_orchestrator_config(model: str, base_url: str) -> AgentConfig:
         tools=cfg.get("tools"),
         max_iterations=cfg.get("max_iterations", 20),
         context_window=cfg.get("context_window", 20),
+        subagents=get_subagents(),
     )
 
 
@@ -70,7 +72,7 @@ def run_interactive(
     The orchestrator first produces a structured delegation plan via
     `submit_plan`. The plan is passed to `approval_callback`, which returns
     an `ApprovalDecision`. If approved, the orchestrator then executes the
-    plan via `delegate_to`. If rejected, the run is aborted and a failed
+    plan via the built-in `task` tool. If rejected, the run is aborted and a
     `AgentResult` is returned.
 
     Args:

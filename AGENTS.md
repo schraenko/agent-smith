@@ -4,7 +4,7 @@
 
 | Directory | Imports as | Test dir | Dependencies |
 |---|---|---|---|
-| `agent_smith/` | `agent_smith` | `tests/` | langchain>=1.0.0 |
+| `agent_smith/` | `agent_smith` | `tests/` | langchain>=1.0.0, deepagents>=0.6.12, langgraph>=1.2.0 |
 
 ## Setup
 
@@ -37,15 +37,14 @@ chmod +x .git/hooks/pre-push               # Pre-Push-Hook aktivieren
 Functional style — no agent classes, no inheritance.
 
 - **Entrypoints:** `agent_smith.run()` or direct `run_web_search()`, `run_code()`, etc.
-- **Agent runner:** `agents/runner.py` — agentic loop with LangChain tool binding, plan-phase + execute-phase for HITL, MCP fallback (`_mcp_fallback_agent`, `_mcp_fallback_task`)
-- **Built-in agents:** `agents/builtins.py` — 6 agents (WebSearch, Code, Document, API, Data, Orchestrator)
-- **Tools:** `tools/builtins.py` — 9 tools + `delegate_to` + `submit_plan` + 4 security tools
-- **HITL:** `approval.py` (Plan/Subtask dataclasses) + `tools/submit_plan.py` (plan submission + validation)
-- **MCP Routing:** `mcp_routing.py` — deterministic task-to-MCP-server keyword matching
-- **MCP Clients:** `mcp_clients.py` — synchronous dispatcher for osm_router + weather servers
+- **Agent runner:** `agents/runner.py` — agentic loop powered by `deepagents.create_deep_agent`, plan-phase (with `interrupt_on`) + execute-phase for HITL
+- **Built-in agents:** `agents/builtins.py` — 6 agents (WebSearch, Code, Document, API, Data, Orchestrator) + `get_subagents()` for DeepAgents SubAgent configs
+- **Tools:** `tools/builtins.py` — 7 domain tools (web_search, execute_python, http_get, http_post, read_csv, describe_data, query_data) + `submit_plan` + 4 security tools. Filesystem tools (read_file, ls, glob, grep, write_file, edit_file) provided by DeepAgents built-in
+- **HITL:** `approval.py` (Plan/Subtask dataclasses) + `tools/submit_plan.py` (plan submission + validation) + runner's `interrupt_on` for plan-phase pause
+- **MCP:** MCP servers connect via `langchain-mcp-adapters` `MultiServerMCPClient` (runtime concern, not bundled)
 - **MCP Servers:** `mcp_servers/` — FastMCP servers (osm_router, weather, rain_sensor) with mock fallback
 - **Workflows:** `workflows/engine.py` — `run_sequential`, `run_parallel`, `run_conditional`
-- **Memory:** `memory/store.py` — sliding-window utilities
+- **Memory:** `memory/store.py` — sliding-window utilities (legacy, DeepAgents manages context internally)
 - **Types:** `types.py` — `AgentResult` (status/output/error/intermediate_steps/audit_trail)
 - **Audit Trail:** `audit.py` — `AuditEntry`, `AuditTrail` + Context-Vars for full observability
 - **Rules:** `rules/` — Markdown files with YAML frontmatter for agent configuration
@@ -54,14 +53,34 @@ Functional style — no agent classes, no inheritance.
 ## Key conventions
 
 - LLM backend is **Ollama-only**. No OpenAI/Anthropic adapters.
-- LangChain types live only in `llm.py` and `runner.py`. The rest of the codebase uses plain types.
+- Agentic loop powered by **DeepAgents** (`create_deep_agent` on LangGraph). LangChain/LangGraph types confined to `llm.py` and `runner.py`.
 - No formatter, linter, type checker, or pre-commit hook configured.
-- Orchestrator agent delegates via `delegate_to` tool (max 20 iterations); all other agents default to 10.
+- Orchestrator delegates via built-in `task` tool with custom SubAgents (max 20 iterations); all other agents default to 10.
 - No generated code, no migrations, no build artifacts.
-- Tool calling includes fallback parsing for models that output tool calls as text (e.g., Qwen3 with Ollama).
-- Fallback parsing supports XML tags (`<tool_call>- Tool calling uses native Ollama tool-calling API (no text fallback needed). Default model: `gemma4:12b`.
-- MCP subtasks transparently fall back to `WebSearchAgent` on failure (osm_router, weather only).
-- `mcp_servers/` must be on `sys.path` (`.pth` workaround in venv — see Setup).
+- Tool calling uses native Ollama tool-calling API (no text fallback needed). Default model: `gemma4:12b`.
+- DeepAgents provides built-in filesystem tools (read_file, ls, glob, grep, write_file, edit_file). Agent-smith domain tools (web_search, execute_python, http_get/post, read_csv, describe/query_data) are passed via `tools=`.
+- HITL plan-phase uses DeepAgents `interrupt_on={"submit_plan": True}` to pause before plan submission.<tool_call>- **Entrypoints:** `agent_smith.run()` or direct `run_web_search()`, `run_code()`, etc.
+- **Agent runner:** `agents/runner.py` — agentic loop powered by `deepagents.create_deep_agent`, plan-phase (with `interrupt_on`) + execute-phase for HITL
+- **HITL:** `approval.py` (Plan/Subtask dataclasses) + `tools/submit_plan.py` (plan submission + validation) + runner's `interrupt_on` for plan-phase pause
+- **MCP:** MCP servers connect via `langchain-mcp-adapters` `MultiServerMCPClient` (runtime concern, not bundled)
+- **MCP Servers:** `mcp_servers/` — FastMCP servers (osm_router, weather, rain_sensor) with mock fallback
+- **Workflows:** `workflows/engine.py` — `run_sequential`, `run_parallel`, `run_conditional`
+- **Memory:** `memory/store.py` — sliding-window utilities (legacy, DeepAgents manages context internally)
+- **Types:** `types.py` — `AgentResult` (status/output/error/intermediate_steps/audit_trail)
+- **Audit Trail:** `audit.py` — `AuditEntry`, `AuditTrail` + Context-Vars for full observability
+- **Rules:** `rules/` — Markdown files with YAML frontmatter for agent configuration
+- **Security:** `tools/security.py` — bandit_scan, secret_scan, audit_dependencies, security_scan
+
+## Key conventions
+
+- LLM backend is **Ollama-only**. No OpenAI/Anthropic adapters.
+- Agentic loop powered by **DeepAgents** (`create_deep_agent` on LangGraph). LangChain/LangGraph types confined to `llm.py` and `runner.py`.
+- No formatter, linter, type checker, or pre-commit hook configured.
+- Orchestrator delegates via built-in `task` tool with custom SubAgents (max 20 iterations); all other agents default to 10.
+- No generated code, no migrations, no build artifacts.
+- Tool calling uses native Ollama tool-calling API (no text fallback needed). Default model: `gemma4:12b`.
+- DeepAgents provides built-in filesystem tools (read_file, ls, glob, grep, write_file, edit_file). Agent-smith domain tools (web_search, execute_python, http_get/post, read_csv, describe/query_data) are passed via `tools=`.
+- HITL plan-phase uses DeepAgents `interrupt_on={"submit_plan": True}` to pause before plan submission.
 
 ## OpenCode Agents & Skills
 

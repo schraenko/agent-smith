@@ -1,18 +1,18 @@
 ---
-title: "Architektur — agent-smith (LangChain Edition)"
+title: "Architektur — agent-smith (DeepAgents Edition)"
 author: "Marco Schrank"
-date: "2026-07-28"
+date: "2026-07-30"
 tags:
   - architektur
-  - langchain
+  - deepagents
   - systemdesign
   - hitl
-abstract: "Vollständige Architekturbeschreibung der LangChain-basierten Agenten-Engine inkl. Human-in-the-Loop-Flow."
+abstract: "Vollständige Architekturbeschreibung der DeepAgents-basierten Agenten-Engine inkl. Human-in-the-Loop-Flow."
 ---
 
-# Architektur — agent-smith (LangChain Edition)
+# Architektur — agent-smith (DeepAgents Edition)
 
-> Vollstaendige Architekturbeschreibung der LangChain-basierten Agenten-Engine.
+> Vollstaendige Architekturbeschreibung der DeepAgents-basierten Agenten-Engine.
 
 ---
 
@@ -25,9 +25,10 @@ keine Framework-Abstraktionen jenseits der LangChain-Nutzung in isolierten Modul
 **Kernprinzipien:**
 
 - **Funktionaler Stil** — Alles sind Funktionen und Dataclasses, keine Klassen hierarchien
-- **LangChain-Isolation** — LangChain-Typen nur in `llm.py`, `runner.py`, `memory/store.py`, `tools/builtins.py`, `tools/delegate.py`
+- **DeepAgents-basiert** — Der agentic loop wird von DeepAgents (`create_deep_agent`) auf LangGraph gemanaged; LangChain/LangGraph-Typen sind auf `llm.py` und `runner.py` beschraenkt
 - **Ollama-only** — Keine OpenAI/Anthropic/andere Provider
 - **Rule-basierte Agenten** — Agentenkonfiguration in Markdown-Dateien mit YAML-Frontmatter
+- **SubAgent-Delegation** — Der Orchestrator delegiert Subtasks via DeepAgents' built-in `task`-Tool mit konfigurierten SubAgents
 - **Audit Trail** — Vollstaendige Nachverfolgung aller LLM-Aufrufe, Tool-Calls und Delegationen
 
 ---
@@ -45,20 +46,26 @@ agent-smith/
 │   ├── approval.py             # Subtask, Plan, ApprovalDecision (HITL)
 │   ├── agents/
 │   │   ├── __init__.py         # Re-exports
-│   │   ├── runner.py           # Agentic-Loop + Plan/Execute-Phase
-│   │   └── builtins.py         # 6 vordefinierte Agenten
+│   │   ├── runner.py           # DeepAgents-Agentic-Loop + Plan/Execute-Phase
+│   │   └── builtins.py         # 6 vordefinierte Agenten + get_subagents()
 │   ├── tools/
-│   │   ├── __init__.py         # Re-exports + delegate_to/submit_plan Registrierung
-│   │   ├── builtins.py         # 9 Standard-Tools + Registry
-│   │   ├── delegate.py         # Orchestrator-Delegationstool (mit Audit)
-│   │   └── submit_plan.py      # Plan-Submission-Tool (HITL)
-│   ├── memory/
-│   │   ├── __init__.py         # Re-exports
+│   │   ├── __init__.py         # Re-exports + submit_plan + security Registrierung
+│   │   ├── builtins.py         # 7 Domain-Tools + Registry
+│   │   ├── submit_plan.py      # Plan-Submission-Tool (HITL)
+│   │   └── security.py         # 4 Security-Tools (bandit, secret, audit, combined)
+│   ├── memory/                 # Legacy (DeepAgents managed context intern)
+│   │   ├── __init__.py
 │   │   └── store.py            # Sliding-Window, last_assistant_text
 │   └── workflows/
-│       ├── __init__.py         # Re-exports
+│       ├── __init__.py
 │       └── engine.py           # Sequential, Parallel, Conditional
 ├── mcp_servers/                # MCP-Server (extern)
+│   ├── osm_router/
+│   │   ├── server.py           # OpenStreetMap Routing (FastMCP)
+│   │   └── client.py           # Sync Wrapper
+│   ├── weather/
+│   │   ├── server.py           # Wetterdaten (FastMCP)
+│   │   └── client.py           # Sync Wrapper
 │   └── rain_sensor/
 │       └── server.py           # Rain Sensor Mock-Server (SSE)
 ├── rules/                      # Agenten-Definitionen (Markdown)
@@ -71,6 +78,8 @@ agent-smith/
 ├── tests/                      # Unit- und Integrationstests
 │   ├── test_agent_smith.py
 │   ├── test_hitl.py            # HITL-spezifische Tests
+│   ├── test_security.py        # Security-Tool-Tests
+│   ├── test_mcp_routing.py     # MCP-Routing-Tests
 │   └── test_ollama_integration.py
 ├── docs/                       # Dokumentation
 ├── examples/                   # Beispielcode
@@ -86,38 +95,39 @@ agent-smith/
 
 | Paket | Version | Zweck |
 |-------|---------|-------|
-| `langchain` | >=1.0.0 | LLM-Framework (Message-Typen, Tool-Decorator) |
+| `deepagents` | >=0.6.12 | Agent-Harness (agentic loop, SubAgent-Delegation, HITL-Interrupts) |
+| `langchain` | >=1.0.0 | LLM-Framework (transitiv ueber DeepAgents) |
 | `langchain-ollama` | >=0.3.0 | Ollama LLM-Provider (`ChatOllama`) |
-| `langchain-community` | >=0.3.0 | Community-Integrationen |
 | `langchain-core` | >=0.3.0 | Core-Typen (`AIMessage`, `ToolMessage`, etc.) |
 | `httpx` | >=0.27.0 | HTTP-Client fuer `http_get`/`http_post` |
 | `pandas` | >=2.0.0 | CSV-/Data-Analyse-Tools |
 | `ddgs` | >=7.0.0 | DuckDuckGo-Suche (`web_search`) |
-| `mcp[cli]` | >=1.27 | MCP-Server-SDK (fuer rain_sensor) |
+| `mcp[cli]` | >=1.27 | MCP-Server-SDK (fuer MCP-Server) |
 
 ### 3.2 Interne Abhaengigkeiten
 
 ```mermaid
 graph TD
     subgraph "agent_smith/__init__.py"
-        INIT["__init__.py<br/>(run, _AGENT_MAP)"]
+        INIT["__init__.py<br/>(run, run_interactive, _AGENT_MAP)"]
     end
 
     subgraph "Kernmodule"
         TYPES["types.py<br/>(Status, AgentResult)"]
         LLM["llm.py<br/>(OllamaConfig, make_llm)"]
         RULES["rules.py<br/>(load_rule)"]
-        AUDIT["audit.py<br/>(AuditTrail, AuditEntry, Context-Vars)"]
+        AUDIT["audit.py<br/>(AuditTrail, AuditEntry)"]
+        APPROVAL["approval.py<br/>(Plan, Subtask, ApprovalDecision)"]
     end
 
     subgraph "agents/"
-        RUNNER["runner.py<br/>(AgentConfig, run_agent)"]
-        BUILTINS_A["builtins.py<br/>(6 Agent-Factorys)"]
+        RUNNER["runner.py<br/>(AgentConfig, run_agent,<br/>_build_deep_agent, HITL-Phasen)"]
+        BUILTINS_A["builtins.py<br/>(6 Agent-Factorys + get_subagents)"]
     end
 
     subgraph "tools/"
-        TOOLS_B["builtins.py<br/>(9 Tools, TOOL_MAP)"]
-        DELEGATE["delegate.py<br/>(delegate_to, Audit-Logging)"]
+        TOOLS_B["builtins.py<br/>(7 Domain-Tools, TOOL_MAP)"]
+        SECURITY["security.py<br/>(4 Security-Tools)"]
         SUBMIT_PLAN["submit_plan.py<br/>(submit_plan, HITL)"]
         TOOLS_INIT["__init__.py<br/>(Registrierung)"]
     end
@@ -126,27 +136,27 @@ graph TD
         ENGINE["engine.py<br/>(Step, WorkflowResult)"]
     end
 
-    subgraph "memory/"
-        STORE["store.py<br/>(window, last_assistant_text)"]
-    end
-
     subgraph "mcp_servers/"
-        MCP["rain_sensor/server.py<br/>(Mock Regensensoren)"]
+        MCP_OSM["osm_router/<br/>(Routing)"]
+        MCP_WEATHER["weather/<br/>(Wetter)"]
+        MCP_RAIN["rain_sensor/<br/>(Mock-Regen)"]
     end
 
     RUNNER --> LLM
     RUNNER --> TOOLS_B
+    RUNNER --> SECURITY
     RUNNER --> TYPES
     RUNNER --> AUDIT
+    RUNNER -.->|via deepagents| MCP_OSM
+    RUNNER -.->|via deepagents| MCP_WEATHER
     BUILTINS_A --> RUNNER
     BUILTINS_A --> LLM
     BUILTINS_A --> RULES
     BUILTINS_A --> TYPES
-    BUILTINS_A --> AUDIT
     TOOLS_INIT --> TOOLS_B
-    TOOLS_INIT --> DELEGATE
+    TOOLS_INIT --> SECURITY
     TOOLS_INIT --> SUBMIT_PLAN
-    DELEGATE --> AUDIT
+    SUBMIT_PLAN --> APPROVAL
     SUBMIT_PLAN --> AUDIT
     ENGINE --> RUNNER
     ENGINE --> TYPES
@@ -155,6 +165,7 @@ graph TD
     INIT --> LLM
     INIT --> TYPES
     INIT --> ENGINE
+    INIT --> APPROVAL
 ```
 
 ---
@@ -225,76 +236,113 @@ def load_rule(name: str) -> dict:
 - Der Markdown-Body wird als `system_prompt` zurueckgegeben
 - Einzelne Tool-Strings werden zu Listen normalisiert
 
-### 4.4 [`agents/runner.py`](../agent_smith/agents/runner.py) — Agentic-Loop
+### 4.4 [`agents/runner.py`](../agent_smith/agents/runner.py) — Agentic-Loop (DeepAgents)
 
-Das Herzstueck. Eine einzige Funktion `run_agent` fuer den agentic loop,
-plus zwei HITL-spezifische Phasen-Funktionen.
+Das Herzstueck. Der agentic loop wird von DeepAgents' `create_deep_agent`
+gemanaged — LangChain/LangGraph-Typen sind auf dieses Modul beschraenkt.
+
+**AgentConfig** — deterministische Konfiguration fuer einen Agenten:
 
 ```python
-MAX_ITERATIONS = 10
-
 @dataclass(frozen=True)
 class AgentConfig:
     name: str
     system_prompt: str
     llm: OllamaConfig = field(default_factory=OllamaConfig)
     tools: list[str] | None = None
-    max_iterations: int = MAX_ITERATIONS
+    max_iterations: int = 10
     context_window: int = 20
+    subagents: list = field(default_factory=list)  # DeepAgents SubAgent-Dicts
+```
 
-def run_agent(
-    task: str,
-    config: AgentConfig,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-) -> AgentResult: ...
+**run_agent** — delegiert den gesamten Loop an DeepAgents:
 
-def run_agent_plan_phase(
-    task: str,
-    config: AgentConfig,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-) -> tuple[Plan | None, AgentResult]:
-    """HITL Phase 1: fuehrt Agentic-Loop aus, bis submit_plan aufgerufen wird."""
+```python
+def run_agent(task, config, audit_trail=None, level=0) -> AgentResult:
+    agent = _build_deep_agent(config)         # create_deep_agent(...)
+    invoke_config = {"recursion_limit": ...}
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": task}]},
+        config=invoke_config,
+    )
+    output = _extract_final_output(result["messages"])
+    return AgentResult.ok(output=output, ...)
+```
 
-def run_agent_execute_phase(
-    task: str,
-    plan: Plan,
-    config: AgentConfig,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-) -> AgentResult:
-    """HITL Phase 2: fuehrt genehmigten Plan via delegate_to aus."""
+**run_agent_plan_phase** — HITL Phase 1 mit Direkt-Invocation (kein DeepAgents-Graph):
 
-def _trim(messages: list, max_messages: int) -> list: ...
+```python
+def run_agent_plan_phase(task, config, audit_trail=None, level=0):
+    llm = make_llm(config.llm)
+    bound_llm = llm.bind_tools([submit_plan])
+    messages = [SystemMessage(config.system_prompt), HumanMessage(task)]
+    for _ in range(max_attempts):
+        response = bound_llm.invoke(messages)
+        # Bei tool_calls mit submit_plan: Plan extrahieren
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                if tc["name"] == "submit_plan":
+                    plan = parse_plan_from_args(tc["args"])
+                    return plan, AgentResult.ok(...)
+        # Sonst: erneut auffordern, submit_plan zu verwenden
+        messages.append(HumanMessage("You must call submit_plan."))
+    return None, AgentResult.ok(...)
+```
 
-def _execute_tool_calls(
-    tool_calls: list,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-    agent_name: str = "",
-) -> list[ToolMessage]: ...
+> **Warum kein DeepAgents?** `create_agent` setzt `tool_choice=None` (LangChain-Factory,
+> Zeile 634 in `factory.py`), wodurch das LLM `submit_plan` ignorieren kann. Mit
+> `bind_tools` + Schleife erzwingen wir den Tool-Call mit automatischem Retry.
+
+**run_agent_execute_phase** — HITL Phase 2, deterministische Ausfuehrung:
+
+```python
+def run_agent_execute_phase(task, plan, config, audit_trail=None, level=0):
+    for subtask in plan.subtasks:
+        result = _delegate_sync(subtask.agent, subtask.task, ...)
+    # Letzter LLM-Call kombiniert alle Subtask-Ergebnisse
+    final = llm.invoke([SystemMessage(...), HumanMessage(...)])
+    return AgentResult.ok(output=final.content)
 ```
 
 **Ablauf (siehe Abschnitt 6).**
 
 ### 4.5 [`agents/builtins.py`](../agent_smith/agents/builtins.py) — Vordefinierte Agenten
 
-6 Agenten, jeweils als Factory-Funktion + Convenience-`run_*`-Funktion:
+6 Agenten, jeweils als Factory-Funktion + Convenience-`run_*`-Funktion.
+DeepAgents stellt built-in Dateisystem-Tools (`read_file`, `ls`, `glob`,
+`grep`, `write_file`, `edit_file`) bereit — diese muessen nicht manuell
+konfiguriert werden.
 
 | Agent | Rule-Datei | Tools | max_iterations |
 |-------|-----------|-------|----------------|
 | WebSearchAgent | `web_search.md` | `web_search` | 10 |
 | CodeExecutionAgent | `code.md` | `execute_python` | 10 |
-| DocumentAgent | `document.md` | `read_file`, `list_files` | 10 |
+| DocumentAgent | `document.md` | (DeepAgents built-in) | 10 |
 | APIAgent | `api.md` | `http_get`, `http_post` | 10 |
 | DataAgent | `data.md` | `read_csv`, `query_data`, `describe_data` | 10 |
-| OrchestratorAgent | `orchestrator.md` | `submit_plan`, `delegate_to` | 20 |
+| OrchestratorAgent | `orchestrator.md` | `submit_plan`, (SubAgents via `task`) | 20 |
 
 Der Orchestrator erhaelt 20 Iterationen (doppelte Anzahl), da jede Delegation
 als eine Iteration zaehlt.
 
-**Pattern:**
+**get_subagents()** — baut DeepAgents SubAgent-Dicts aus den Rule-Dateien:
+
+```python
+def get_subagents() -> list[dict]:
+    """Jeder SubAgent hat: name, description, system_prompt, tools."""
+    agents = []
+    for rule_name in ("web_search", "code", "document", "api", "data"):
+        cfg = load_rule(rule_name)
+        agents.append({
+            "name": cfg["name"],
+            "description": cfg["system_prompt"].split("\\n")[0],
+            "system_prompt": cfg["system_prompt"],
+            "tools": cfg.get("tools") or [],
+        })
+    return agents
+```
+
+**Pattern fuer jeden Agenten:**
 
 ```python
 def _agent_from_rule(name, llm=None) -> AgentConfig:
@@ -315,20 +363,28 @@ def run_web_search(task, llm=None, audit_trail=None, level=0) -> AgentResult:
     return run_agent(task, web_search_agent(llm), audit_trail=audit_trail, level=level)
 ```
 
+Der Orchestrator erhaelt zusaetzlich die SubAgents:
+
+```python
+def orchestrator_agent(llm=None) -> AgentConfig:
+    cfg = _agent_from_rule("orchestrator", llm)
+    return replace(cfg, subagents=get_subagents())
+```
+
 Alle `run_*`-Funktionen akzeptieren optionale `audit_trail`- und `level`-Parameter
 fuer die vollstaendige Nachverfolgung.
 
-### 4.6 [`tools/builtins.py`](../agent_smith/tools/builtins.py) — Standard-Tools
+### 4.6 [`tools/builtins.py`](../agent_smith/tools/builtins.py) — Domain-Tools
 
-9 Tools, dekoriert mit LangChain `@tool`. Jedes Tool faengt Fehler ab und
-liefert ein Dict statt Exceptions.
+7 Domain-Tools, dekoriert mit LangChain `@tool`. Jedes Tool faengt Fehler ab
+und liefert ein Dict statt Exceptions. Dateisystem-Tools (`read_file`, `ls`,
+`glob`, `grep`, `write_file`, `edit_file`) werden von DeepAgents built-in
+bereitgestellt.
 
 | Tool | Signatur | Beschreibung |
 |------|----------|-------------|
 | `web_search` | `(query: str, max_results: int = 5)` | DuckDuckGo-Suche |
 | `execute_python` | `(code: str, timeout: int = 30)` | Python-Code in Subprocess |
-| `read_file` | `(path: str, max_chars: int = 10000)` | Datei lesen |
-| `list_files` | `(path: str = ".", pattern: str = "*")` | Dateien auflisten |
 | `http_get` | `(url: str, headers?, params?)` | HTTP GET |
 | `http_post` | `(url: str, body: dict, headers?)` | HTTP POST |
 | `read_csv` | `(path: str, max_rows: int = 100)` | CSV lesen |
@@ -338,8 +394,11 @@ liefert ein Dict statt Exceptions.
 **Globale Registry:**
 
 ```python
-ALL_TOOLS = [web_search, execute_python, read_file, list_files,
-             http_get, http_post, read_csv, describe_data, query_data]
+ALL_TOOLS = [
+    web_search, execute_python,
+    http_get, http_post,
+    read_csv, describe_data, query_data,
+]
 
 TOOL_MAP: dict[str, object] = {t.name: t for t in ALL_TOOLS}
 
@@ -347,69 +406,76 @@ def get_tools(names=None) -> list:
     """Tools nach Name zurueckgeben, oder alle wenn names=None."""
 ```
 
-### 4.7 [`tools/delegate.py`](../agent_smith/tools/delegate.py) — Orchestrator-Tool
+### 4.7 Delegation via DeepAgents SubAgents
 
-Wird exklusiv vom OrchestratorAgent genutzt. Verwendet lazy imports um
-Zirkular-Abhaengigkeiten zu vermeiden. Nutzt Context-Variablen fuer
-die Audit-Trail-Weitergabe.
+Der Orchestrator delegiert Subtasks nicht mehr ueber ein separates `delegate_to`-Tool,
+sondern via DeepAgents' built-in `task`-Tool. Die fuenf Specialist-Agenten werden
+als SubAgent-Dicts konfiguriert (siehe `get_subagents()` in 4.5).
 
 ```python
-from agent_smith.audit import get_current_trail, get_current_level
-
-@tool
-def delegate_to(agent: str, task: str) -> str:
-    """Delegiert Subtask an einen Specialist-Agenten."""
-    trail = get_current_trail()
-    level = get_current_level()
-
-    if trail:
-        trail.log(level=level, agent=agent, action="delegate", task=task)
-
-    # Lazy import innerhalb der Funktion
-    from agent_smith.agents.builtins import (
-        run_api, run_code, run_data, run_document, run_web_search,
-    )
-    dispatch = {
-        "WebSearchAgent": run_web_search,
-        "CodeExecutionAgent": run_code,
-        "DocumentAgent": run_document,
-        "APIAgent": run_api,
-        "DataAgent": run_data,
-    }
-    runner = dispatch.get(agent)
-    if runner is None:
-        return f"Unknown agent: {agent}"
-    result = runner(task, audit_trail=trail, level=level + 1) if trail else runner(task)
-
-    if trail:
-        output = result.output if result.success else (result.error or "unknown error")
-        trail.log(level=level, agent=agent, action="delegate_result",
-                  result=str(output), success=result.success)
-
-    return result.output if result.success else f"Agent failed: {result.error}"
+# In orchestrator_agent():
+return replace(cfg, subagents=get_subagents())
 ```
 
-**Context-Variablen:** Da `delegate_to` als LangChain-Tool von LLMs aufgerufen wird,
-kann der Audit-Trail nicht als Parameter uebergeben werden. Stattdessen werden
-`contextvars` verwendet, um den Trail implizit durch die Tool-Aufrufe zu leiten.
+DeepAgents injected automatisch ein `task`-Tool, mit dem der Orchestrator
+SubAgents aufrufen kann. Der Dispatch erfolg nicht mehr manuell ueber ein
+Dict, sondern wird von DeepAgents anhand der SubAgent-Konfiguration gemanaged:
+
+| SubAgent | Role | Bereitgestellt durch |
+|----------|------|---------------------|
+| `WebSearchAgent` | Web-Recherche | `get_subagents()` |
+| `CodeExecutionAgent` | Python-Code-Ausfuehrung | `get_subagents()` |
+| `DocumentAgent` | Dateisystem-Zugriff | `get_subagents()` |
+| `APIAgent` | HTTP-Requests | `get_subagents()` |
+| `DataAgent` | CSV-Datenanalyse | `get_subagents()` |
+
+Vorteile gegenueber dem alten `delegate_to`-Ansatz:
+- **Kein manueller Dispatch** — DeepAgents matched Agent-Namen automatisch
+- **Keine zirkulaeren Importe** — Lazy-Import-Pattern entfaellt komplett
+- **Context-Isolation** — SubAgent sieht nur sein Ergebnis, nicht den gesamten Verlauf
+- **Audit-Trail** — Wird von DeepAgents via LangSmith-Tracing oder eigenem Audit gefuehrt
 
 ### 4.8 [`tools/__init__.py`](../agent_smith/tools/__init__.py) — Registrierung
 
 ```python
 from agent_smith.tools.builtins import ALL_TOOLS, TOOL_MAP, get_tools
-from agent_smith.tools.delegate import delegate_to
 from agent_smith.tools.submit_plan import submit_plan
+from agent_smith.tools.security import (
+    bandit_scan, secret_scan, audit_dependencies, security_scan,
+)
 
-ALL_TOOLS.append(delegate_to)
-TOOL_MAP["delegate_to"] = delegate_to
+for _t in (bandit_scan, secret_scan, audit_dependencies, security_scan):
+    ALL_TOOLS.append(_t)
+    TOOL_MAP[_t.name] = _t
+
 ALL_TOOLS.append(submit_plan)
 TOOL_MAP["submit_plan"] = submit_plan
 ```
 
-Mutiert `ALL_TOOLS` und `TOOL_MAP` zur Import-Zeit — `delegate_to` und
-`submit_plan` sind danach im globalen Tool-Registry verfuegbar.
+Mutiert `ALL_TOOLS` und `TOOL_MAP` zur Import-Zeit — Security-Tools und
+`submit_plan` sind danach im globalen Tool-Registry verfuegbar. Anders als
+frueher gibt es kein `delegate_to`-Tool mehr (Delegation erfolgt via
+DeepAgents' built-in `task`-Tool).
 
-### 4.9 [`tools/submit_plan.py`](../agent_smith/tools/submit_plan.py) — Plan-Submission (HITL)
+### 4.9 [`tools/security.py`](../agent_smith/tools/security.py) — Security-Tools
+
+Vier Sicherheitsscanner als LangChain-Tools. Jedes Tool kapselt ein externes
+Tool (bandit, gitleaks, pip-audit) mit einem Regex-Fallback fuer Umgebungen
+ohne installierte Binaries.
+
+| Tool | Scanner | Severities | Beschreibung |
+|------|---------|------------|-------------|
+| `bandit_scan(path)` | bandit (Python) | critical/warning/info | Erkennt gefaehrliche Funktionen (`eval`, `exec`, `pickle`, etc.) |
+| `secret_scan(path)` | gitleaks / Regex-Fallback | critical | Erkennt Secrets (API-Keys, Passwoerter, Tokens) |
+| `audit_dependencies()` | pip-audit | warning | Scannt Python-Dependencies auf bekannte CVEs |
+| `security_scan(path)` | Alle drei kombiniert | — | Aggregierter Report mit BESTANDEN/NICHT BESTANDEN |
+
+**Severity-Modell:**
+- `critical` — blockiert den Push im Pre-Push-Hook
+- `warning` — wird im Report vermerkt, blockiert nicht
+- `info` — informelle Hinweise
+
+### 4.10 [`tools/submit_plan.py`](../agent_smith/tools/submit_plan.py) — Plan-Submission (HITL)
 
 Wird vom OrchestratorAgent in der Plan-Phase des Human-in-the-Loop-Flows
 genutzt. Nimmt strukturierte Argumente entgegen und validiert den Plan.
@@ -434,11 +500,10 @@ def submit_plan(
 - Task darf nicht leer sein
 - Subtasks-Liste darf nicht leer sein
 
-**Zwei akzeptierte Eingabeformate via `parse_plan_from_args`:**
+**Eingabeformat via `parse_plan_from_args`:**
 - `{"subtasks": [...], "reasoning": "..."}` — strukturiertes Format (gemma4:12b)
-- `{"plan_json": "<json string>"}` — Backward-Compat
 
-### 4.10 [`approval.py`](../agent_smith/approval.py) — HITL-Datentypen
+### 4.11 [`approval.py`](../agent_smith/approval.py) — HITL-Datentypen
 
 Reine Domain-Dataclasses fuer den Human-in-the-Loop-Flow. Keine
 externen Abhaengigkeiten.
@@ -469,7 +534,7 @@ VALID_AGENTS = (
 `Plan.from_json()` validiert strikt: leerer Subtasks-Liste, unbekannte Agenten
 und leere Tasks werden abgelehnt.
 
-### 4.11 [`memory/store.py`](../agent_smith/memory/store.py) — Memory-Utilities
+### 4.12 [`memory/store.py`](../agent_smith/memory/store.py) — Memory-Utilities (Legacy)
 
 Funktionale Wrapper fuer Nachrichtenlisten.
 
@@ -484,7 +549,7 @@ def last_assistant_text(messages: list[BaseMessage]) -> str | None:
 > **Bekanntes Problem:** `window()` ist funktionsgleich mit `runner._trim()`
 > (Code-Duplizierung).
 
-### 4.12 [`workflows/engine.py`](../agent_smith/workflows/engine.py) — Workflow-Engine
+### 4.13 [`workflows/engine.py`](../agent_smith/workflows/engine.py) — Workflow-Engine
 
 Drei Ausfuehrungsmodi fuer mehrstufige Agenten-Pipelines.
 
@@ -514,10 +579,10 @@ def run_conditional(condition, if_true, if_false, prior_results=None) -> Workflo
 | `run_parallel` | ThreadPoolExecutor, alle Steps gleichzeitig, jeder bekommt leeres prior_results |
 | `run_conditional` | Laufzeit-Bedingung waehlt Branch, dann sequential-Ausfuehrung |
 
-### 4.13 [`__init__.py`](../agent_smith/__init__.py) — Oeffentliche API
+### 4.14 [`__init__.py`](../agent_smith/__init__.py) — Oeffentliche API
 
 ```python
-_Agent_MAP = {
+_AGENT_MAP = {
     "web_search": run_web_search,
     "code": run_code,
     "document": run_document,
@@ -540,16 +605,26 @@ def run(
     return runner(task, llm=llm)
 
 
+def _load_orchestrator_config(model: str, base_url: str) -> AgentConfig:
+    cfg = load_rule("orchestrator")
+    return AgentConfig(
+        name=cfg["name"],
+        system_prompt=cfg["system_prompt"],
+        llm=OllamaConfig(model=model, base_url=base_url),
+        tools=cfg.get("tools"),
+        max_iterations=cfg.get("max_iterations", 20),
+        context_window=cfg.get("context_window", 20),
+        subagents=get_subagents(),
+    )
+
+
 def run_interactive(
     task: str,
     approval_callback: Callable[[Plan], ApprovalDecision],
     model: str = "gemma4:12b",
     base_url: str = "http://localhost:11434",
 ) -> AgentResult:
-    """
-    Human-in-the-Loop: Orchestrator plant zuerst, holt User-Bestaetigung,
-    fuehrt dann aus.
-    """
+    """run_interactive: Plan-Phase (interrupt_on) → User-Approval → Execute-Phase."""
     config = _load_orchestrator_config(model, base_url)
     plan, phase1_result = run_agent_plan_phase(task, config)
     if plan is None:
@@ -567,10 +642,12 @@ def run_interactive(
     return run_agent_execute_phase(task, plan, config, audit_trail=phase1_result.audit_trail)
 ```
 
-### 4.14 [`audit.py`](../agent_smith/audit.py) — Audit-Trail
+### 4.15 [`audit.py`](../agent_smith/audit.py) — Audit-Trail (eigen)
 
-Protokolliert alle LLM-Aufrufe, Tool-Calls und Delegationen.
-Bietet strukturierte Konsolenausgabe und formatierte Berichte.
+Ergaenzt das interne DeepAgents-Tracing um projektspezifische Audit-Events.
+Protokolliert besonders die HITL-Planung (plan_submitted/approved/rejected)
+und die `_delegate_sync`-Aufrufe in der Execute-Phase. Bietet strukturierte
+Konsolenausgabe und formatierte Berichte.
 
 **Context-Variablen (fuer Tool-Delegation):**
 
@@ -637,13 +714,13 @@ class AuditTrail:
 
 ```
 [0] LLM Call (iteration 1)
-[0] TOOL: delegate_to({'agent': 'WebSearchAgent', 'task': '...'})
-[0] DELEGATE -> WebSearchAgent
+[0] TOOL: task(agent='WebSearchAgent', task='...')
+[0] DELEGATE -> WebSearchAgent (SubAgent)
     Task: What is the capital of France?
-  [1] LLM Call (iteration 1)
+  [1] (SubAgent-interner Loop)
   [1] TOOL: web_search({'query': 'capital of France'})
   [1] RESULT: [{'title': 'Paris', ...}]
-  [1] LLM Call (iteration 2)
+  [1] SubAgent abgeschlossen
 [0] RESULT [OK] from WebSearchAgent
     Output: Paris ist die Hauptstadt von Frankreich...
 [0] LLM Call (iteration 2)
@@ -675,48 +752,42 @@ Beschreibt die Rolle und Grenzen des Agenten.
 |-------|-------|-------|----------|----------------|
 | `web_search.md` | WebSearchAgent | `web_search` | 10 | 20 |
 | `code.md` | CodeExecutionAgent | `execute_python` | 10 | 20 |
-| `document.md` | DocumentAgent | `read_file`, `list_files` | 10 | 20 |
+| `document.md` | DocumentAgent | (DeepAgents built-in filesystem) | 10 | 20 |
 | `api.md` | APIAgent | `http_get`, `http_post` | 10 | 20 |
 | `data.md` | DataAgent | `read_csv`, `query_data`, `describe_data` | 10 | 20 |
-| `orchestrator.md` | OrchestratorAgent | `submit_plan`, `delegate_to` | 20 | 20 |
+| `orchestrator.md` | OrchestratorAgent | `submit_plan` (task via SubAgents) | 20 | 20 |
 
 ---
 
-## 6. Agentic-Loop
+## 6. Agentic-Loop (DeepAgents)
+
+DeepAgents' `create_deep_agent` baut einen LangGraph-State-Graphen, der den
+agentic Loop intern managet: LLM-Call, Tool-Binding, Context-Management und
+SubAgent-Delegation.
 
 ```mermaid
 flowchart TD
-    START(["run_agent(task, config)"]) --> INIT["tools = get_tools(config.tools)<br/>llm = make_llm_with_tools(config.llm, tools)<br/>messages = [SystemMessage, HumanMessage]"]
-    INIT --> LOOP{"iteration < max_iterations?"}
-
-    LOOP -- Ja --> AUDIT_LOG["audit_trail.log(action='llm_call', level=level)"]
-    AUDIT_LOG --> TRIM["windowed = _trim(messages, context_window)"]
-    TRIM --> INVOKE["response = llm.invoke(windowed)"]
-
-    INVOKE -- Exception --> FAIL["return AgentResult.fail(error)"]
-
-    INVOKE -- OK --> APPEND["messages.append(response)"]
-    APPEND --> HAS_TOOLS{"response.tool_calls?"}
-
-    HAS_TOOLS -- Nein --> DONE["return AgentResult.ok(response.content)"]
-    HAS_TOOLS -- Ja --> EXEC["_execute_tool_calls(tool_calls, audit_trail, level)"]
-    EXEC --> EXTEND["messages.extend(tool_messages)<br/>intermediate_steps.extend(...)"]
-    EXTEND --> LOOP
-
-    LOOP -- Nein --> MAX["return AgentResult.fail('Max iterations reached')"]
+    START(["run_agent(task, config)"]) --> BUILD["_build_deep_agent(config)<br/>create_deep_agent(model, tools, system_prompt, subagents)"]
+    BUILD --> INVOKE["agent.invoke({messages: [user-task]}, config=recursion_limit)"]
+    INVOKE --> DEEP["DeepAgents-interner Loop<br/>(LLM-Call → Tool-Call → Tool-Result → wiederholen)"]
+    DEEP --> RESULT["messages-Liste mit finaler AIMessage"]
+    RESULT --> EXTRACT["_extract_final_output(messages)<br/>_collect_tool_steps(messages)"]
+    EXTRACT --> DONE["AgentResult.ok(output, steps, audit_trail)"]
+    INVOKE -- Exception --> FAIL["AgentResult.fail(error)"]
 
     style START fill:#4CAF50,color:#fff
     style DONE fill:#4CAF50,color:#fff
     style FAIL fill:#f44336,color:#fff
-    style MAX fill:#f44336,color:#fff
+    style DEEP fill:#2196F3,color:#fff
 ```
 
 **Schluessel-Details:**
 
-1. **Sliding Window** — `_trim()` bewahrt immer den fuehrenden `SystemMessage` auf
-2. **Tool-Ausfuehrung** — Jeder Tool-Call wird einzeln ausgefuehrt, Fehler werden als JSON-String in `ToolMessage` zurueckgegeben
-3. **Audit-Trail** — Jeder LLM-Aufruf und Tool-Call wird protokolliert
-4. **Abbruchbedingungen:** Text-Antwort (Erfolg), LLM-Ausnahme (Fehler), Max-Iterationen (Fehler)
+1. **DeepAgents-intern** — Der eigentliche Loop (LLM-Call, Tool-Binding, Sliding-Window, SubAgent-Delegation) wird von DeepAgents' `create_deep_agent` auf LangGraph gemanaged
+2. **Recursion Limit** — `max_iterations` wird auf ein LangGraph-Recursion-Limit gemappt (`max(8, max_iterations * 2)`)
+3. **Kein eigenes Tool-Call-Parsing** — DeepAgents verarbeitet native Ollama `tool_calls` ohne Text-Fallback
+4. **Built-in Filesystem-Tools** — `read_file`, `ls`, `glob`, `grep`, `write_file`, `edit_file` werden von DeepAgents bereitgestellt
+5. **Abbruchbedingungen:** Text-Antwort (Erfolg), LLM-Ausnahme (Fehler), Recursion-Limit erreicht
 
 ---
 
@@ -727,21 +798,30 @@ flowchart LR
     subgraph "tools/builtins.py"
         T1[web_search]
         T2[execute_python]
-        T3[read_file]
-        T4[list_files]
-        T5[http_get]
-        T6[http_post]
-        T7[read_csv]
-        T8[describe_data]
-        T9[query_data]
+        T3[http_get]
+        T4[http_post]
+        T5[read_csv]
+        T6[describe_data]
+        T7[query_data]
         ALL["ALL_TOOLS (Liste)"]
         MAP["TOOL_MAP (Dict)"]
     end
 
+    subgraph "tools/security.py"
+        S1[bandit_scan]
+        S2[secret_scan]
+        S3[audit_dependencies]
+        S4[security_scan]
+    end
+
     subgraph "tools/__init__.py"
         REG["Registrierung"]
-        D[delegate_to]
         SP[submit_plan]
+    end
+
+    subgraph "DeepAgents built-in"
+        FS[read_file, ls, glob, grep, write_file, edit_file]
+        TASK[task (SubAgent-Delegation)]
     end
 
     T1 --> ALL
@@ -751,13 +831,13 @@ flowchart LR
     T5 --> ALL
     T6 --> ALL
     T7 --> ALL
-    T8 --> ALL
-    T9 --> ALL
     ALL --> MAP
-    D --> REG
+    S1 --> REG
+    S2 --> REG
+    S3 --> REG
+    S4 --> REG
     SP --> REG
     REG -->|append| ALL
-    REG -->|TOOL_MAP['delegate_to']| MAP
     REG -->|TOOL_MAP['submit_plan']| MAP
 
     subgraph "agents/runner.py"
@@ -770,37 +850,40 @@ flowchart LR
 ```
 
 **`get_tools(names)`** — Liefert Tools nach Name, oder alle Tools wenn `names=None`.
+Dateisystem-Tools und das `task`-Tool werden von DeepAgents built-in bereitgestellt
+und muessen nicht per Tool-Registry konfiguriert werden.
 
 ---
 
-## 8. Orchestrator-Delegation
+## 8. Orchestrator-Delegation (DeepAgents SubAgents)
+
+Der Orchestrator delegiert Subtasks via DeepAgents' built-in `task`-Tool.
+Die fuenf Specialist-Agenten sind als SubAgents konfiguriert (siehe `get_subagents()`).
+Jeder SubAgent laeuft in einem isolierten DeepAgents-Kontext.
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant O as OrchestratorAgent
-    participant D as delegate_to
-    participant S as Specialist (z.B. WebSearchAgent)
-    participant A as AuditTrail
+    participant DA as DeepAgents (create_deep_agent)
+    participant T as task-Tool (built-in)
+    participant S as SubAgent (WebSearchAgent)
 
     U->>O: task
-    Note over O: audit_trail.log(level=0, action="llm_call")
-    O->>O: LLM entscheidet: delegate_to(agent, task)
-    Note over O: audit_trail.log(level=0, action="tool_call")
-    O->>D: delegate_to("WebSearchAgent", "Finde Info X")
-    Note over D: get_current_trail() via contextvars
-    Note over D: audit_trail.log(level=0, action="delegate")
-    D->>S: run_web_search("Finde Info X", audit_trail, level=1)
-    Note over S: audit_trail.log(level=1, action="llm_call")
-    S->>S: agentic loop (web_search tool)
-    Note over S: audit_trail.log(level=1, action="tool_call")
-    Note over S: audit_trail.log(level=1, action="tool_result")
-    S-->>D: AgentResult (mit audit_trail)
-    Note over D: audit_trail.log(level=0, action="delegate_result")
-    D-->>O: result.output
-    O->>O: LLM verarbeitet Ergebnis
-    Note over O: audit_trail.log(level=0, action="llm_call")
-    O-->>U: AgentResult (finaler Output + audit_trail)
+    Note over O: AgentConfig mit subagents=[WebSearch, Code, ...]
+    O->>DA: create_deep_agent(model, tools, subagents)
+    Note over DA: LangGraph-State-Graph mit SubAgent-Nodes
+    O->>DA: agent.invoke({messages: [user-task]})
+    Note over DA: LLM entscheidet: task(agent, task)
+    DA->>T: task("WebSearchAgent", "Finde Info X")
+    Note over T: DeepAgents matched Agent-Namen<br/>aus subagents-Liste
+    T->>S: SubAgent invoke (isolierter Kontext)
+    Note over S: Agentic Loop (LLM + web_search-Tool)
+    S-->>T: SubAgent-Result
+    T-->>DA: Ergebnis-String
+    Note over DA: LLM verarbeitet Ergebnis
+    DA-->>O: AgentResult (messages-Liste)
+    O-->>U: AgentResult.ok(output)
 ```
 
 ---
@@ -816,27 +899,28 @@ vor der Ausfuehrung. Implementiert ueber `run_interactive(task, approval_callbac
 sequenceDiagram
     participant U as User
     participant I as run_interactive
-    participant P as Plan-Phase (submit_plan)
-    participant E as Execute-Phase (delegate_to)
+    participant P as Plan-Phase (interrupt_on)
+    participant E as Execute-Phase (_delegate_sync)
     participant S as Specialist
 
     U->>I: task
     I->>P: run_agent_plan_phase(task, config)
-    Note over P: tools = [submit_plan]
+    Note over P: create_deep_agent(interrupt_on={"submit_plan": True})
     P->>P: LLM ruft submit_plan(subtasks, reasoning)
+    Note over P: DeepAgents pausiert vor submit_plan
     Note over P: audit: plan_submitted
-    P-->>I: (Plan, AgentResult)
+    P-->>I: (Plan aus tool_calls extrahiert, AgentResult)
     I->>U: approval_callback(plan)
     U-->>I: ApprovalDecision(approved, feedback)
 
     alt approved = true
         I->>E: run_agent_execute_phase(task, plan, config)
-        Note over E: tools = [delegate_to]
-        Note over E: audit: plan_approved
+        Note over E: deterministische Schleife ueber Subtasks
         loop fuer jeden Subtask
-            E->>S: delegate_to(agent, task)
-            S-->>E: result
+            E->>S: _delegate_sync(agent, task)
+            S-->>E: result (AgentResult.output)
         end
+        Note over E: Letzter LLM-Call kombiniert Ergebnisse
         E-->>I: AgentResult (final)
         I-->>U: AgentResult
     else approved = false
@@ -847,14 +931,17 @@ sequenceDiagram
 
 ### 9.2 Zwei-Phasen-Architektur
 
-| Phase | Funktion | Verfuegbare Tools | Zweck |
-|-------|----------|-------------------|-------|
-| Plan | `run_agent_plan_phase` | nur `submit_plan` | Orchestrator generiert strukturierten Plan |
-| Execute | `run_agent_execute_phase` | nur `delegate_to` | Genehmigter Plan wird Subtask fuer Subtask ausgefuehrt |
+| Phase | Funktion | Mechanismus | Zweck |
+|-------|----------|-------------|-------|
+| Plan | `run_agent_plan_phase` | `bind_tools` + Retry-Loop | Orchestrator wird direkt invociert, bis `submit_plan` aufgerufen wird |
+| Execute | `run_agent_execute_phase` | `_delegate_sync()` + finaler LLM-Call | Genehmigter Plan wird deterministisch ausgefuehrt |
 
-Diese harte Trennung wird durch `tools=["submit_plan"]` bzw. `tools=["delegate_to"]`
-in den jeweiligen Phasen-Konfigurationen erzwungen. Der LLM kann die Phasen
-nicht mischen.
+Die Plan-Phase nutzt eine direkte `bind_tools`-Invocation statt DeepAgents'
+`interrupt_on`, da `create_agent` in LangChain `tool_choice=None` setzt und
+das LLM `submit_plan` sonst ignorieren kann. Ein Retry-Loop mit max 20
+Versuchen stellt sicher, dass der Plan erstellt wird. Die Execute-Phase ist
+eine einfache Python-Schleife ohne agentic Loop — jeder Subtask wird via
+`_delegate_sync()` direkt an den entsprechenden Agenten delegiert.
 
 ### 9.3 Approval-Callback
 
@@ -969,11 +1056,13 @@ flowchart TD
 | Regel | Beschreibung |
 |-------|-------------|
 | Funktionales Paradigma | Keine Klassen, keine Vererbung — nur Funktionen und Dataclasses |
-| LangChain-Isolation | LangChain-Typen nur in `llm.py`, `runner.py`, `memory/store.py`, `tools/` |
+| DeepAgents-basiert | Agentic Loop powered by `deepagents.create_deep_agent` auf LangGraph |
 | Ollama-only | Kein OpenAI/Anthropic/anderer Provider |
 | Tool-Fehlerbehandlung | Tools liefern Fehler-Dicts, nie Exceptions an den Caller |
 | Rule-basiert | Agentenkonfiguration in Markdown-Dateien, nicht im Code |
-| Audit-Trail | Vollstaendige Nachverfolgung aller Interaktionen mit dem LLM |
+| SubAgent-Delegation | Orchestrator delegiert via `task`-Tool mit SubAgents |
+| Tool-Calling | Native Ollama Tool-Calling-API (kein Text-Fallback) |
+| Audit-Trail | Eigenes Audit-Trail (audit.py) + DeepAgents-internes Tracing |
 | Keine Formatter/Linter | Kein ruff, black, mypy oder pre-commit hooks konfiguriert |
 | Naming | `test_{function}_{scenario}` fuer Tests |
 | Python >=3.11 | Type-Annotationen mit `str | None`, `list[str]`, etc. |
@@ -984,14 +1073,12 @@ flowchart TD
 
 | Problem | Beschreibung |
 |---------|-------------|
-| Code-Duplizierung | `memory/store.py::window()` ist funktionsgleich mit `runner.py::_trim()` |
-| Stille Fehler | `get_tools()` ueberspringt unbekannte Tool-Namen ohne Warnung |
-| Unstrukturierte Fehler | `delegate_to` liefert Strings statt strukturierter Dicts zurueck |
-| Hardcoded Dispatch | Agent-Dispatch in `delegate.py` manuell gepflegt |
+| Legacy `_trim()` | `runner._trim()` wird trotz DeepAgents-internem Context-Management noch vorgehalten (ungenutzt) |
 | Import-Seiteneffekte | `tools/__init__.py` mutiert `ALL_TOOLS` und `TOOL_MAP` zur Import-Zeit |
 | Test-Luecken | Fehlende Tests fuer: Rules-Parser, parallel/conditional workflows |
 | Generische System-Prompts | Nur 2-3 Saetze, kein Ausgabeformat spezifiziert |
 | Kein Sandboxing | `execute_python` fuehrt Code ohne Sicherheitsbeschraenkungen aus |
+| MCP-Routing-Fallback | MCP-Fehler landen als Text im `task`-Tool-Ergebnis, kein automatischer Web-Fallback |
 
 ---
 
@@ -1014,6 +1101,12 @@ flowchart TD
 # Unit-Tests (gemockt, kein Ollama noetig)
 python -m pytest tests/
 
+# Security-Tests isoliert ausfuehren
+python -m pytest tests/test_security.py -v
+
+# MCP-Routing-Tests
+python -m pytest tests/test_mcp_routing.py -v
+
 # HITL-Tests isoliert ausfuehren
 python -m pytest tests/test_hitl.py -v
 
@@ -1026,21 +1119,57 @@ python -m pytest --cov=agent_smith
 
 ---
 
-## 14. MCP Server (rain_sensor)
+## 14. MCP Server
 
-### 13.1 Ueberblick
+Drei FastMCP-basierte Mock-Server fuer Tests und Prototyping.
+Jeder Server hat einen synchronen Python-Wrapper-Client fuer direkte Aufrufe.
+
+### 14.1 osm_router — OpenStreetMap Routing
+
+Mock-Routing-Server fuer Routenplanung und Distanzberechnung.
+
+**Starten:**
+```bash
+python mcp_servers/osm_router/server.py
+# Server laeuft auf http://localhost:8081/sse
+```
+
+**Tools:**
+
+| Tool | Beschreibung | Parameter |
+|------|--------------|-----------|
+| `get_route_distance(start, end)` | Distanz zwischen zwei Orten | `start: str`, `end: str` |
+| `get_route_info(start, end)` | Detaillierte Routeninformationen | `start: str`, `end: str` |
+
+### 14.2 weather — Wetterdaten
+
+Mock-Wetter-Server mit zufallsgenerierten Wetterdaten.
+
+**Starten:**
+```bash
+python mcp_servers/weather/server.py
+# Server laeuft auf http://localhost:8082/sse
+```
+
+**Tools:**
+
+| Tool | Beschreibung | Parameter |
+|------|--------------|-----------|
+| `get_weather(location)` | Aktuelles Wetter fuer einen Ort | `location: str` |
+| `get_forecast(location)` | Wettervorhersage (3 Tage) | `location: str` |
+
+### 14.3 rain_sensor — Regensensor-Netzwerk
 
 Mock-MCP-Server fuer ein gefaktes Regensensor-Netzwerk.
-Werte werden mit Zufallszahlen generiert. Nuetzt fuer Tests und Prototyping.
+Werte werden mit Zufallszahlen generiert.
 
-### 13.2 Starten
-
+**Starten:**
 ```bash
 python mcp_servers/rain_sensor/server.py
 # Server laeuft auf http://localhost:8080/sse
 ```
 
-### 13.3 Tools
+**Tools:**
 
 | Tool | Beschreibung | Parameter |
 |------|--------------|-----------|
@@ -1049,22 +1178,7 @@ python mcp_servers/rain_sensor/server.py
 | `get_rain_level()` | Durchschnitt/Min/Max aller Sensoren | - |
 | `get_alerts(threshold)` | Sensoren ueber Schwellenwert | `threshold: float = 5.0` |
 
-### 13.4 Sensor-Struktur
-
-```json
-{
-  "id": "sensor_01",
-  "name": "Berlin-Mitte",
-  "location": {"lat": 52.52, "lon": 13.40},
-  "rain_mm": 12.5,
-  "humidity": 72,
-  "temperature": 15.3,
-  "status": "online",
-  "last_update": "2026-07-27T14:30:00Z"
-}
-```
-
-### 13.5 Sensoren
+**Sensoren:**
 
 | ID | Name | Standort |
 |----|------|----------|
@@ -1075,11 +1189,19 @@ python mcp_servers/rain_sensor/server.py
 | sensor_05 | Frankfurt-West | Frankfurt |
 | sensor_06 | Stuttgart-Nord | Stuttgart |
 
-### 13.6 Konfiguration in OpenCode
+### 14.4 Konfiguration in OpenCode
 
 ```json
 {
   "mcpServers": {
+    "osm-router": {
+      "command": "python",
+      "args": ["mcp_servers/osm_router/server.py"]
+    },
+    "weather": {
+      "command": "python",
+      "args": ["mcp_servers/weather/server.py"]
+    },
     "rain-sensor": {
       "command": "python",
       "args": ["mcp_servers/rain_sensor/server.py"]

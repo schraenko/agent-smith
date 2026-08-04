@@ -30,6 +30,20 @@ from agent_smith.tools.submit_plan import (
 )
 
 
+def _fake_bound_llm(*responses):
+    """Build a stub bind_tools chain returning the given AIMessage responses in sequence."""
+    bound = MagicMock()
+    bound.invoke.side_effect = list(responses)
+    return bound
+
+
+def _mock_model(mock_make_llm, *responses):
+    """Configure make_llm mock to return a model whose bind_tools yields the given responses."""
+    llm = MagicMock()
+    llm.bind_tools.return_value = _fake_bound_llm(*responses)
+    mock_make_llm.return_value = llm
+
+
 # ─── Plan validation ─────────────────────────────────────────────────────────
 
 def test_plan_from_json_minimal():
@@ -144,46 +158,6 @@ def test_parse_plan_from_args_structured_no_reasoning():
     assert plan.reasoning == ""
 
 
-def test_submit_plan_accepts_mcp_subtask():
-    """MCP-Subtask im structured Format wird akzeptiert."""
-    args = {
-        "subtasks": [{"mcp_server": "osm_router", "tool_name": "get_route_distance",
-                      "args": {"start": "Berlin", "end": "Hamburg"}}],
-        "reasoning": "Direct MCP call",
-    }
-    result = submit_plan.invoke(args)
-    assert result == PLAN_SUBMITTED_MARKER
-
-
-def test_parse_plan_from_args_mcp_subtask():
-    """parse_plan_from_args with MCP-Subtask."""
-    args = {
-        "subtasks": [{"mcp_server": "weather", "tool_name": "get_weather",
-                      "args": {"location": "Berlin"}}],
-    }
-    plan = parse_plan_from_args(args)
-    assert len(plan.subtasks) == 1
-    assert plan.subtasks[0].is_mcp
-    assert plan.subtasks[0].mcp_server == "weather"
-    assert plan.subtasks[0].tool_name == "get_weather"
-
-
-def test_parse_plan_from_args_mixed_subtasks():
-    """Agent + MCP-Subtasks gemischt."""
-    args = {
-        "subtasks": [
-            {"mcp_server": "weather", "tool_name": "get_weather",
-             "args": {"location": "Berlin"}},
-            {"agent": "WebSearchAgent", "task": "Find hotels in Berlin"},
-        ],
-    }
-    plan = parse_plan_from_args(args)
-    assert len(plan.subtasks) == 2
-    assert plan.subtasks[0].is_mcp
-    assert not plan.subtasks[1].is_mcp
-    assert plan.subtasks[1].agent == "WebSearchAgent"
-
-
 def test_parse_plan_from_args_backward_compat():
     """Old format with plan_json string still works."""
     args = {"plan_json": '{"subtasks": [{"agent": "APIAgent", "task": "GET /x"}]}'}
@@ -198,20 +172,18 @@ def _config():
         name="OrchestratorAgent",
         system_prompt="You are a test orchestrator.",
         llm=OllamaConfig(),
-        tools=["submit_plan", "delegate_to"],
+        tools=["submit_plan"],
         max_iterations=5,
     )
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_plan_phase_captures_submitted_plan(mock_make_llm_wt):
+@patch("agent_smith.agents.runner.make_llm")
+def test_plan_phase_captures_submitted_plan(mock_make_llm):
     plan_json = (
         '{"subtasks": [{"agent": "WebSearchAgent", "task": "Search X"}]}'
     )
     tc = {"id": "1", "name": "submit_plan", "args": {"plan_json": plan_json}}
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = AIMessage(content="", tool_calls=[tc])
-    mock_make_llm_wt.return_value = mock_llm
+    _mock_model(mock_make_llm, AIMessage(content="", tool_calls=[tc]))
 
     plan, result = run_agent_plan_phase("test task", _config())
     assert plan is not None
@@ -219,9 +191,9 @@ def test_plan_phase_captures_submitted_plan(mock_make_llm_wt):
     assert any(e.action == "plan_submitted" for e in result.audit_trail.entries)
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_plan_phase_captures_structured_submission(mock_make_llm_wt):
-    """Qwen3 calls submit_plan with subtasks+reasoning as separate args."""
+@patch("agent_smith.agents.runner.make_llm")
+def test_plan_phase_captures_structured_submission(mock_make_llm):
+    """submit_plan with subtasks+reasoning as separate args."""
     tc = {
         "id": "1",
         "name": "submit_plan",
@@ -230,9 +202,7 @@ def test_plan_phase_captures_structured_submission(mock_make_llm_wt):
             "reasoning": "Need to find X",
         },
     }
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = AIMessage(content="", tool_calls=[tc])
-    mock_make_llm_wt.return_value = mock_llm
+    _mock_model(mock_make_llm, AIMessage(content="", tool_calls=[tc]))
 
     plan, result = run_agent_plan_phase("test task", _config())
     assert plan is not None
@@ -241,11 +211,11 @@ def test_plan_phase_captures_structured_submission(mock_make_llm_wt):
     assert any(e.action == "plan_submitted" for e in result.audit_trail.entries)
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_plan_phase_returns_none_when_no_submission(mock_make_llm_wt):
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = AIMessage(content="I'll do it directly", tool_calls=[])
-    mock_make_llm_wt.return_value = mock_llm
+@patch("agent_smith.agents.runner.make_llm")
+def test_plan_phase_returns_none_when_no_submission(mock_make_llm):
+    # Return non-tool-call responses on all retry attempts (max_attempts = 5)
+    no_tool = AIMessage(content="I'll do it directly", tool_calls=[])
+    _mock_model(mock_make_llm, *([no_tool] * 5))
 
     plan, result = run_agent_plan_phase("test task", _config())
     assert plan is None
@@ -253,12 +223,10 @@ def test_plan_phase_returns_none_when_no_submission(mock_make_llm_wt):
     assert all(e.action != "plan_submitted" for e in result.audit_trail.entries)
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_plan_phase_rejects_invalid_plan_json(mock_make_llm_wt):
+@patch("agent_smith.agents.runner.make_llm")
+def test_plan_phase_rejects_invalid_plan_json(mock_make_llm):
     tc = {"id": "1", "name": "submit_plan", "args": {"plan_json": "not json"}}
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = AIMessage(content="", tool_calls=[tc])
-    mock_make_llm_wt.return_value = mock_llm
+    _mock_model(mock_make_llm, AIMessage(content="", tool_calls=[tc]))
 
     plan, result = run_agent_plan_phase("test task", _config())
     assert plan is None
@@ -284,29 +252,25 @@ def test_execute_phase_logs_approval_and_runs(mock_make_llm):
 
 # ─── run_interactive ─────────────────────────────────────────────────────────
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
 @patch("agent_smith.agents.runner.make_llm")
-def test_run_interactive_approved_executes_plan(mock_make_llm, mock_make_llm_wt):
+def test_run_interactive_approved_executes_plan(mock_make_llm):
     plan_json = (
         '{"subtasks": [{"agent": "WebSearchAgent", "task": "Search X"}]}'
     )
     tc = {"id": "1", "name": "submit_plan", "args": {"plan_json": plan_json}}
 
-    call_count = {"n": 0}
+    # First call: plan phase (make_llm → bind_tools → invoke returns submit_plan)
+    # Second call: execute phase (make_llm → invoke returns combine result)
+    def make_llm_side_effect(*_a, **_kw):
+        m = MagicMock()
+        # First invoke returns submit_plan, subsequent invokes return combine result
+        m.bind_tools.return_value.invoke.side_effect = [
+            AIMessage(content="", tool_calls=[tc]),
+            AIMessage(content="Final answer.", tool_calls=[]),
+        ]
+        return m
 
-    def llm_wt_side_effect(_msgs):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return AIMessage(content="", tool_calls=[tc])
-        return AIMessage(content="Final answer.", tool_calls=[])
-
-    mock_llm_wt = MagicMock()
-    mock_llm_wt.invoke.side_effect = llm_wt_side_effect
-    mock_make_llm_wt.return_value = mock_llm_wt
-
-    mock_llm_plain = MagicMock()
-    mock_llm_plain.invoke.return_value = AIMessage(content="Final answer.", tool_calls=[])
-    mock_make_llm.return_value = mock_llm_plain
+    mock_make_llm.side_effect = make_llm_side_effect
 
     decisions = []
     def callback(plan: Plan) -> ApprovalDecision:
@@ -324,15 +288,16 @@ def test_run_interactive_approved_executes_plan(mock_make_llm, mock_make_llm_wt)
     assert "plan_approved" in actions
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_run_interactive_rejected_aborts(mock_make_llm_wt):
+@patch("agent_smith.agents.runner.make_llm")
+def test_run_interactive_rejected_aborts(mock_make_llm):
     plan_json = (
         '{"subtasks": [{"agent": "WebSearchAgent", "task": "Search X"}]}'
     )
     tc = {"id": "1", "name": "submit_plan", "args": {"plan_json": plan_json}}
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = AIMessage(content="", tool_calls=[tc])
-    mock_make_llm_wt.return_value = mock_llm
+
+    llm = MagicMock()
+    llm.bind_tools.return_value.invoke.return_value = AIMessage(content="", tool_calls=[tc])
+    mock_make_llm.return_value = llm
 
     def callback(plan: Plan) -> ApprovalDecision:
         return ApprovalDecision(approved=False, feedback="too risky")
@@ -347,11 +312,14 @@ def test_run_interactive_rejected_aborts(mock_make_llm_wt):
     assert "plan_rejected" in actions
 
 
-@patch("agent_smith.agents.runner.make_llm_with_tools")
-def test_run_interactive_no_plan_submitted(mock_make_llm_wt):
-    mock_llm = MagicMock()
-    mock_llm.invoke.return_value = AIMessage(content="I'll just do it.", tool_calls=[])
-    mock_make_llm_wt.return_value = mock_llm
+@patch("agent_smith.agents.runner.make_llm")
+def test_run_interactive_no_plan_submitted(mock_make_llm):
+    no_tool = AIMessage(content="I'll just do it.", tool_calls=[])
+
+    llm = MagicMock()
+    # Return no_tool on every call (covers all retry attempts)
+    llm.bind_tools.return_value.invoke.return_value = no_tool
+    mock_make_llm.return_value = llm
 
     callback_called = {"n": 0}
     def callback(plan: Plan) -> ApprovalDecision:

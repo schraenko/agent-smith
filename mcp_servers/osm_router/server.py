@@ -49,6 +49,8 @@ MOCK_CITY_COORDS: dict[str, tuple[float, float]] = {
     "bremen": (8.8017, 53.0793),
     "rostock": (12.0991, 54.0924),
     "flensburg": (9.4368, 54.7836),
+    "bruchsal": (8.5980,49.1256),
+    "nußloch": (8.8333,49.3167)
 }
 
 

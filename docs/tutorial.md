@@ -43,6 +43,8 @@ Das ist im Kern alles. Alles andere ist Konfiguration.
 - **Funktional** — Keine Klassen, keine Vererbung, nur Funktionen
 - **Ollama-only** — Kein OpenAI, kein Cloud, alles lokal
 - **Rule-basiert** — Agenten werden in Markdown-Dateien konfiguriert, nicht im Code
+- **DeepAgents-basiert** — Der agentic loop wird von DeepAgents (`create_deep_agent`) gemanaged
+- **SubAgent-Delegation** — Der Orchestrator delegiert Subtasks via DeepAgents' built-in `task`-Tool
 
 ---
 
@@ -80,7 +82,8 @@ pip install -e ".[dev]"
 
 | Paket | Wofuer? |
 |-------|---------|
-| `langchain` | LLM-Framework fuer Message-Typen und Tool-Decorator |
+| `deepagents` | Agent-Harness (agentic loop, SubAgent-Delegation, HITL-Interrupts) |
+| `langchain` | LLM-Framework (transitiv ueber DeepAgents) |
 | `langchain-ollama` | Verbindung zu Ollama |
 | `httpx` | HTTP-Requests (http_get, http_post Tools) |
 | `pandas` | CSV-Analyse (read_csv, describe_data, query_data) |
@@ -94,8 +97,8 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Alle 93 Unit-Tests (gemockt, kein Ollama noetig) sollten gruen sein.
-Die 3 Integrationstests (`test_ollama_integration.py`) benoetigen einen
+Alle Unit-Tests (gemockt, kein Ollama noetig) sollten gruen sein.
+Die Integrationstests (`test_ollama_integration.py`) benoetigen einen
 laufenden Ollama-Server mit dem Modell `gemma4:12b`.
 
 ---
@@ -112,7 +115,7 @@ print(result.output)
 ```
 
 Das war's. `run()` ist der Convenience-Einstiegspunkt. Er:
-1. Erstellt eine LLM-Konfiguration (Standard: phi4, localhost:11434)
+1. Erstellt eine LLM-Konfiguration (Standard: gemma4:12b, localhost:11434)
 2. Waehlt den OrchestratorAgent als Standard-Agenten
 3. Fuehrt den Agentic Loop aus
 4. Gibt ein `AgentResult` zurueck
@@ -165,10 +168,10 @@ lebt in Markdown-Dateien unter `rules/`.
 |-------|-------|-------|-------------|
 | **WebSearchAgent** | `rules/web_search.md` | `web_search` | Im Internet suchen |
 | **CodeExecutionAgent** | `rules/code.md` | `execute_python` | Python-Code ausfuehren |
-| **DocumentAgent** | `rules/document.md` | `read_file`, `list_files` | Dateien lesen und analysieren |
+| **DocumentAgent** | `rules/document.md` | (DeepAgents built-in filesystem tools) | Dateien lesen und analysieren |
 | **APIAgent** | `rules/api.md` | `http_get`, `http_post` | HTTP-Requests senden |
 | **DataAgent** | `rules/data.md` | `read_csv`, `query_data`, `describe_data` | CSV-Daten analysieren |
-| **OrchestratorAgent** | `rules/orchestrator.md` | `delegate_to` | Aufgaben an andere Agenten delegieren |
+| **OrchestratorAgent** | `rules/orchestrator.md` | SubAgents via `task`-Tool | Aufgaben an SubAgents delegieren |
 
 ### 4.2 Eine Rule-Datei verstehen
 
@@ -227,20 +230,22 @@ Tools sind die "Werkzeuge", die ein LLM benutzen kann, um mit der
 Aussenwelt zu interagieren. Jedes Tool ist eine einfache Funktion mit
 dem `@tool`-Decorator.
 
-### 5.1 Alle 10 Tools
+### 5.1 Alle 7 Domain-Tools
 
 | Tool | Was macht es? |
 |------|---------------|
 | `web_search` | DuckDuckGo-Suche, liefert Titel + URL + Snippet |
 | `execute_python` | Python-Code in einem Subprocess ausfuehren |
-| `read_file` | Eine Datei vom Band lesen |
-| `list_files` | Dateien in einem Verzeichnis auflisten |
 | `http_get` | HTTP GET-Request senden |
 | `http_post` | HTTP POST-Request mit JSON-Body senden |
 | `read_csv` | CSV-Datei lesen (DictReader) |
 | `describe_data` | Pandas describe fuer CSV-Dateien |
 | `query_data` | Pandas query-Filter auf CSV anwenden |
-| `delegate_to` | Subtask an einen Specialist-Agenten delegieren |
+
+> **Hinweis:** Dateisystem-Tools (`read_file`, `ls`, `glob`, `grep`, `write_file`,
+> `edit_file`) werden von DeepAgents built-in bereitgestellt und muessen nicht
+> manuell registriert werden. Die Delegation an SubAgents erfolgt ebenfalls
+> via DeepAgents' built-in `task`-Tool.
 
 ### 5.2 Wie ein Tool funktioniert
 
@@ -272,12 +277,11 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
 
 ### 5.3 Die Tool-Registry
 
-Alle Tools werden in `tools/builtins.py` registriert:
+Die Domain-Tools werden in `tools/builtins.py` registriert:
 
 ```python
 ALL_TOOLS = [
     web_search, execute_python,
-    read_file, list_files,
     http_get, http_post,
     read_csv, describe_data, query_data,
 ]
@@ -285,17 +289,24 @@ ALL_TOOLS = [
 TOOL_MAP: dict[str, object] = {t.name: t for t in ALL_TOOLS}
 ```
 
-`TOOL_MAP` ist ein Dictionary, das Tool-Namen auf Tool-Funktionen mapped.
-Der Agentic Loop nutzt es, um Tool-Aufrufe des LLMs auszufuehren.
-
-Das `delegate_to`-Tool wird separat in `tools/__init__.py` registriert
-(um zirkulare Abhaengigkeiten zu vermeiden):
+Zusaetzlich registriert `tools/__init__.py` Security-Tools und `submit_plan`:
 
 ```python
-from agent_smith.tools.delegate import delegate_to
-ALL_TOOLS.append(delegate_to)
-TOOL_MAP["delegate_to"] = delegate_to
+from agent_smith.tools.submit_plan import submit_plan
+from agent_smith.tools.security import (
+    bandit_scan, secret_scan, audit_dependencies, security_scan,
+)
+
+for _t in (bandit_scan, secret_scan, audit_dependencies, security_scan):
+    ALL_TOOLS.append(_t)
+    TOOL_MAP[_t.name] = _t
+
+ALL_TOOLS.append(submit_plan)
+TOOL_MAP["submit_plan"] = submit_plan
 ```
+
+`TOOL_MAP` ist ein Dictionary, das Tool-Namen auf Tool-Funktionen mapped.
+Der Agentic Loop (DeepAgents) nutzt es, um Tool-Aufrufe des LLMs auszufuehren.
 
 ### 5.4 Ein eigenes Tool schreiben
 
@@ -314,118 +325,68 @@ Danach in `ALL_TOOLS` und `TOOL_MAP` eintragen, und ein Agent kann es nutzen.
 
 ---
 
-## 6. Der Agentic Loop
+## 6. Der Agentic Loop (DeepAgents)
 
-Das Herzstueck von agent-smith. `run_agent()` in `agents/runner.py` ist
-eine einzige Funktion, die einen Agenten ausfuehrt.
+Das Herzstueck. Der agentic loop wird von DeepAgents' `create_deep_agent`
+gemanaged — wir mappen nur die Konfiguration und wickeln das Ergebnis auf.
 
 ### 6.1 Der Ablauf
 
 ```mermaid
 flowchart TD
-    START(["run_agent(task, config)"]) --> INIT["tools laden<br/>LLM initialisieren<br/>messages = [System, Human]"]
-    INIT --> LOOP{"iteration < max?"}
-    LOOP -- Ja --> TRIM["_trim(messages, window)"]
-    TRIM --> INVOKE["response = llm.invoke(windowed)"]
+    START(["run_agent(task, config)"]) --> BUILD["_build_deep_agent(config)<br/>create_deep_agent(model, tools, system_prompt, subagents)"]
+    BUILD --> INVOKE["agent.invoke({messages:[user-task]}, config=recursion_limit)"]
+    INVOKE --> DEEP["DeepAgents-interner Loop<br/>(LLM-Call → Tool-Call → Tool-Result)"]
+    DEEP --> RESULT["messages-Liste (finale AIMessage)"]
+    RESULT --> EXTRACT["_extract_final_output(messages)<br/>_collect_tool_steps(messages)"]
+    EXTRACT --> DONE["AgentResult.ok(output, steps, audit_trail)"]
     INVOKE -- Exception --> FAIL["AgentResult.fail(error)"]
-    INVOKE -- OK --> APPEND["messages.append(response)"]
-    APPEND --> HAS_TOOLS{"tool_calls?"}
-    HAS_TOOLS -- Nein --> DONE["AgentResult.ok(content)"]
-    HAS_TOOLS -- Ja --> EXEC["_execute_tool_calls()"]
-    EXEC --> EXTEND["messages.extend(tool_messages)"]
-    EXTEND --> LOOP
-    LOOP -- Nein --> MAX["AgentResult.fail('max reached')"]
 
     style START fill:#4CAF50,color:#fff
     style DONE fill:#4CAF50,color:#fff
     style FAIL fill:#f44336,color:#fff
-    style MAX fill:#f44336,color:#fff
+    style DEEP fill:#2196F3,color:#fff
 ```
 
 ### 6.2 Der Code Schritt fuer Schritt
 
 ```python
 def run_agent(task: str, config: AgentConfig) -> AgentResult:
-    # 1. Tools laden
-    tools = get_tools(config.tools) if config.tools is not None else []
+    # 1. DeepAgents-Agent bauen (einmalig)
+    llm = make_llm(config.llm)
+    tool_objs = get_tools(config.tools) if config.tools is not None else []
 
-    # 2. LLM initialisieren (mit oder ohne Tools)
-    llm = make_llm_with_tools(config.llm, tools) if tools else make_llm(config.llm)
+    agent = create_deep_agent(
+        model=llm,
+        tools=tool_objs,
+        system_prompt=config.system_prompt,
+        subagents=config.subagents or None,  # Nur fuer Orchestrator
+    )
 
-    # 3. Nachrichten-Verlauf aufbauen
-    messages = [
-        SystemMessage(content=config.system_prompt),
-        HumanMessage(content=task),
-    ]
-    intermediate_steps = []
+    # 2. Invoke (DeepAgents managt den Loop intern)
+    recursion_limit = max(8, config.max_iterations * 2)
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": task}]},
+        config={"recursion_limit": recursion_limit},
+    )
 
-    # 4. Hauptschleife
-    for iteration in range(config.max_iterations):
-        windowed = _trim(messages, config.context_window)
-
-        try:
-            response = llm.invoke(windowed)
-        except Exception as e:
-            return AgentResult.fail(str(e))
-
-        messages.append(response)
-
-        # 5. Keine Tool-Calls? Fertig.
-        if not response.tool_calls:
-            return AgentResult.ok(output=response.content, steps=intermediate_steps)
-
-        # 6. Tools ausfuehren und Ergebnisse anhaengen
-        tool_messages = _execute_tool_calls(response.tool_calls)
-        intermediate_steps.extend([
-            {"tool": tc["name"], "args": tc["args"]}
-            for tc in response.tool_calls
-        ])
-        messages.extend(tool_messages)
-
-    # 7. Max-Iterationen erreicht
-    return AgentResult.fail(f"Max iterations ({config.max_iterations}) reached")
+    # 3. Ergebnis aus der messages-Liste extrahieren
+    messages = result.get("messages", [])
+    output = _extract_final_output(messages)  # letzte AIMessage
+    steps = _collect_tool_steps(messages)    # ToolMessage-Schritte
+    return AgentResult.ok(output=output, steps=steps)
 ```
 
-### 6.3 Das Sliding-Window (`_trim`)
+### 6.3 Wichtige Unterschiede zum alten Loop
 
-Das LLM hat begrenzten Kontext. `_trim()` schneidet alte Nachrichten ab,
-bewahrt aber immer den System-Prompt:
-
-```python
-def _trim(messages: list, max_messages: int) -> list:
-    if not messages:
-        return []
-    if isinstance(messages[0], SystemMessage):
-        return [messages[0]] + messages[1:][-max(0, max_messages - 1):]
-    return messages[-max_messages:]
-```
-
-**Beispiel:** Bei `context_window=20` werden maximal 19 Nachrichten nach dem
-System-Prompt behalten. Aeltere Nachrichten fallen weg.
-
-### 6.4 Tool-Ausfuehrung (`_execute_tool_calls`)
-
-```python
-def _execute_tool_calls(tool_calls: list) -> list[ToolMessage]:
-    results = []
-    for call in tool_calls:
-        name = call["name"]
-        args = call["args"]
-        tool_fn = TOOL_MAP.get(name)  # Tool im Registry suchen
-        if tool_fn is None:
-            content = json.dumps({"error": f"Unknown tool: {name}"})
-        else:
-            try:
-                content = json.dumps(tool_fn.invoke(args))  # Tool ausfuehren
-            except Exception as e:
-                content = json.dumps({"error": str(e)})
-        results.append(ToolMessage(content=content, tool_call_id=call["id"]))
-    return results
-```
-
-Wichtig: Tools werden per `tool_fn.invoke(args)` aufgerufen — das ist das
-LangChain-Protokoll. Das Ergebnis wird zu JSON serialisiert und als
-`ToolMessage` zurueck an das LLM geschickt.
+| Aspekt | Frueher (LangChain) | Heute (DeepAgents) |
+|--------|-------------------|--------------------|
+| Loop | Manuell (`for iteration in range(max)`) | Intern in LangGraph-State-Graph |
+| Tool-Calls | Manuelles `_execute_tool_calls()` | Automatisch gemanaged |
+| Sliding-Window | `_trim()` in `runner.py` | Intern (konfigurierbar) |
+| Filesystem-Tools | `read_file`, `list_files` in `ALL_TOOLS` | Built-in (read, ls, glob, grep, write, edit) |
+| SubAgent-Delegation | `delegate_to`-Tool + Dispatch-Dict | Built-in `task`-Tool + SubAgent-Config |
+| Tool-Call-Parsing | Text-Fallback-Parser | Native Ollama `tool_calls`-API |
 
 ---
 
@@ -602,67 +563,73 @@ Basierend auf einer Bedingung wird ein Ast waehlbar sequential ausgefuehrt.
 
 ## 9. Der Orchestrator
 
-Der Orchestrator ist ein Agent, der Aufgaben an andere Agenten delegiert.
+Der Orchestrator ist ein Agent, der Aufgaben an SubAgents delegiert.
 Er ist der Standard-Agent in `run()`.
 
 ### 9.1 Wie Delegation funktioniert
+
+Die fuenf Specialist-Agenten werden als DeepAgents SubAgents konfiguriert.
+Der Orchestrator nutzt DeepAgents' built-in `task`-Tool, um Subtasks an
+SubAgents zu delegieren. Jeder SubAgent laeuft in einem isolierten Kontext.
+
+```python
+# builtins.py — SubAgent-Konfiguration aus den Rule-Dateien
+def get_subagents() -> list[dict]:
+    agents = []
+    for rule_name in ("web_search", "code", "document", "api", "data"):
+        cfg = load_rule(rule_name)
+        agents.append({
+            "name": cfg["name"],
+            "description": cfg["system_prompt"].split("\\n")[0],
+            "system_prompt": cfg["system_prompt"],
+            "tools": cfg.get("tools") or [],
+        })
+    return agents
+
+# Der Orchestrator bekommt die SubAgents injiziert
+def orchestrator_agent(llm=None) -> AgentConfig:
+    cfg = _agent_from_rule("orchestrator", llm)
+    return replace(cfg, subagents=get_subagents())
+```
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant O as Orchestrator
-    participant D as delegate_to
-    participant S as Specialist
+    participant DA as DeepAgents (LangGraph)
+    participant T as task-Tool (built-in)
+    participant S as SubAgent
 
     U->>O: "Recherchiere und schreibe Code dafuer"
-    O->>O: LLM denkt nach: "Aufgabe aufteilen"
-    O->>D: delegate_to("WebSearchAgent", "Recherche zu X")
-    D->>S: run_web_search("Recherche zu X")
-    S-->>D: AgentResult
-    D-->>O: result.output
-    O->>D: delegate_to("CodeExecutionAgent", "Schreibe Code basierend auf...")
-    D->>S: run_code("Schreibe Code...")
-    S-->>D: AgentResult
-    D-->>O: result.output
-    O-->>U: Finales Ergebnis
+    O->>DA: create_deep_agent(subagents=[...])
+    Note over DA: LLM entscheidet: task("WebSearchAgent", "...")
+    DA->>T: task("WebSearchAgent", "Recherchiere X")
+    T->>S: SubAgent invoke (isoliert)
+    S-->>T: Ergebnis
+    T-->>DA: Ergebnis-String
+    Note over DA: LLM verarbeitet Ergebnis
+    DA->>T: task("CodeExecutionAgent", "Schreibe Code...")
+    T->>S: SubAgent invoke
+    S-->>T: Ergebnis
+    T-->>DA: Ergebnis-String
+    DA-->>O: Finale Antwort
+    O-->>U: AgentResult.ok(output)
 ```
 
-### 9.2 Das delegate_to Tool
+### 9.2 Vorteile gegenueber dem alten delegate_to-Ansatz
 
-```python
-@tool
-def delegate_to(agent: str, task: str) -> str:
-    from agent_smith.agents.builtins import (
-        run_api, run_code, run_data, run_document, run_web_search,
-    )
-
-    dispatch = {
-        "WebSearchAgent": run_web_search,
-        "CodeExecutionAgent": run_code,
-        "DocumentAgent": run_document,
-        "APIAgent": run_api,
-        "DataAgent": run_data,
-    }
-
-    runner = dispatch.get(agent)
-    if runner is None:
-        return f"Unknown agent: {agent}"
-
-    result = runner(task)
-    return result.output if result.success else f"Agent failed: {result.error}"
-```
-
-**Warum der lazy import?** Wenn `delegate_to` beim Import `agents/builtins.py`
-laden wuerde, entsteht eine zirkulare Abhaengigkeit:
-`tools/__init__.py` -> `delegate.py` -> `agents/builtins.py` -> `runner.py` -> `tools/builtins.py`
-
-Durch den Import innerhalb der Funktion wird das Problem vermieden.
+| Aspekt | Frueher (delegate_to) | Heute (SubAgents) |
+|--------|----------------------|-------------------|
+| Dispatch | Manuelles Dict in `delegate.py` | Automatisch via DeepAgents |
+| Importe | Lazy-Import-Pattern fuer Zirkularvermeidung | Kein Zirkularproblem |
+| Isolation | SubAgent sieht gesamten Verlauf | Nur Ergebnis |
+| Wartung | Dispatch-Liste manuell pflegen | Wird aus Rules generiert |
 
 ### 9.3 Warum 20 Iterationen?
 
 Der Orchestrator hat `max_iterations: 20` (statt 10 wie die anderen).
-Jede Delegation zaehlt als eine Iteration. Da er typischerweise mehrere
-Unteraufgaben delegiert, braucht er mehr Durchlaeufe.
+Jede SubAgent-Delegation zaehlt als eine Iteration. Da er typischerweise
+mehrere Unteraufgaben delegiert, braucht er mehr Durchlaeufe.
 
 ---
 
@@ -698,16 +665,20 @@ else:
 
 `run_interactive()` fuehrt den Orchestrator in zwei getrennten Phasen aus:
 
-1. **Plan-Phase** — Orchestrator bekommt nur `submit_plan` als Tool und
-   erstellt einen strukturierten Plan.
+1. **Plan-Phase** — Das LLM wird direkt mit `bind_tools([submit_plan])`
+   invociert. Der Orchestrator erstellt einen Plan und ruft `submit_plan` auf.
+   Falls er direkt antwortet statt `submit_plan` zu verwenden, wird die
+   Aufforderung wiederholt (bis zu 20 Versuche). Der Plan wird aus den
+   `tool_calls`-Argumenten extrahiert.
 2. **Approval** — Dein Callback bekommt den `Plan` und gibt `ApprovalDecision` zurueck.
-3. **Execute-Phase** — Bei `approved=True` ruft der Orchestrator `delegate_to`
-   fuer jeden Subtask auf. Bei `approved=False` bricht der Lauf ab.
+3. **Execute-Phase** — Bei `approved=True` werden die Subtasks deterministisch
+   via `_delegate_sync()` ausgefuehrt (ohne agentic Loop). Ein finaler LLM-Call
+   kombiniert die Ergebnisse. Bei `approved=False` bricht der Lauf ab.
 
 ```mermaid
 flowchart LR
-    A[Plan-Phase<br/>submit_plan] -->|Plan| B[approval_callback]
-    B -->|approved: true| C[Execute-Phase<br/>delegate_to]
+    A[Plan-Phase<br/>interrupt_on submit_plan] -->|Plan| B[approval_callback]
+    B -->|approved: true| C[Execute-Phase<br/>_delegate_sync + LLM-Combine]
     B -->|approved: false| D[Abbruch<br/>Audit: plan_rejected]
     C --> E[Finales Ergebnis]
 ```
@@ -896,16 +867,17 @@ from agent_smith.agents.builtins import (
 #### `agent_smith/agents/runner.py`
 
 ```python
-import json
 import logging
 from dataclasses import dataclass, field
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from deepagents import create_deep_agent
+from langchain_core.messages import AIMessage, ToolMessage
+
 from agent_smith.approval import Plan
-from agent_smith.audit import AuditTrail, set_audit_context, reset_audit_context
-from agent_smith.llm import OllamaConfig, make_llm, make_llm_with_tools
-from agent_smith.tools.builtins import TOOL_MAP, get_tools
-from agent_smith.tools.submit_plan import PLAN_SUBMITTED_MARKER, parse_plan_from_args
+from agent_smith.audit import AuditTrail
+from agent_smith.llm import OllamaConfig, make_llm
+from agent_smith.tools.builtins import get_tools
+from agent_smith.tools.submit_plan import parse_plan_from_args
 from agent_smith.types import AgentResult
 
 MAX_ITERATIONS = 10
@@ -918,53 +890,60 @@ class AgentConfig:
     tools: list[str] | None = None
     max_iterations: int = MAX_ITERATIONS
     context_window: int = 20
+    subagents: list = field(default_factory=list)
 
-def _trim(messages: list, max_messages: int) -> list: ...
-def _execute_tool_calls(
-    tool_calls: list,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-    agent_name: str = "",
-) -> list[ToolMessage]: ...
+def _build_deep_agent(config: AgentConfig): ...
+def _extract_final_output(messages: list) -> str: ...
+def _collect_tool_steps(messages: list) -> list[dict]: ...
 
 def run_agent(
     task: str,
     config: AgentConfig,
     audit_trail: AuditTrail | None = None,
     level: int = 0,
-) -> AgentResult: ...
+) -> AgentResult:
+    """Delegiert den agentic loop an deepagents.create_deep_agent."""
 
 def run_agent_plan_phase(
     task: str,
     config: AgentConfig,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-) -> tuple[Plan | None, AgentResult]: ...
+    ...
+) -> tuple[Plan | None, AgentResult]:
+    """HITL Phase 1: DeepAgents mit interrupt_on={"submit_plan": True}."""
 
 def run_agent_execute_phase(
     task: str,
     plan: Plan,
     config: AgentConfig,
-    audit_trail: AuditTrail | None = None,
-    level: int = 0,
-) -> AgentResult: ...
+    ...
+) -> AgentResult:
+    """HITL Phase 2: Deterministische Subtask-Ausfuehrung + finaler LLM-Call."""
+
+def _delegate_sync(agent: str, task: str, ...) -> str:
+    """Direkte Delegation (ohne agentic Loop) fuer Execute-Phase."""
 ```
 
-> Das Herzstueck: Implementiert `run_agent` (agentic loop), die
-> Helper-Funktionen `_trim` (sliding window) und `_execute_tool_calls`
-> (fuehrt Tool-Calls aus und sammelt Ergebnisse), sowie die beiden
-> HITL-Phasen-Funktionen `run_agent_plan_phase` und
-> `run_agent_execute_phase`. Tool-Calls erfolgen nativ ueber die
-> Ollama Tool-Calling API (kein Text-Fallback mehr noetig).
+> Das Herzstueck: `run_agent` delegiert den gesamten agentic loop an
+> `deepagents.create_deep_agent`. Die HITL-Phasen nutzen `interrupt_on`
+> (Plan) bzw. `_delegate_sync` (Execute). DeepAgents managet den
+> LangGraph-State-Graphen inklusive Tool-Calling, Context-Management
+> und SubAgent-Delegation. Tool-Calls erfolgen nativ ueber die Ollama
+> Tool-Calling API (kein Text-Fallback mehr noetig).
 
 #### `agent_smith/agents/builtins.py`
 
 ```python
+from dataclasses import replace
 from agent_smith.agents.runner import AgentConfig, run_agent
 from agent_smith.audit import AuditTrail
 from agent_smith.llm import OllamaConfig
 from agent_smith.rules import load_rule
 from agent_smith.types import AgentResult
+
+SUBAGENT_RULES = ("web_search", "code", "document", "api", "data")
+
+def get_subagents() -> list[dict]:
+    """Baut DeepAgents SubAgent-Dicts aus den Rule-Dateien."""
 
 def _agent_from_rule(name: str, llm: OllamaConfig | None = None) -> AgentConfig: ...
 
@@ -973,7 +952,9 @@ def code_agent(llm: OllamaConfig | None = None) -> AgentConfig: ...
 def document_agent(llm: OllamaConfig | None = None) -> AgentConfig: ...
 def api_agent(llm: OllamaConfig | None = None) -> AgentConfig: ...
 def data_agent(llm: OllamaConfig | None = None) -> AgentConfig: ...
-def orchestrator_agent(llm: OllamaConfig | None = None) -> AgentConfig: ...
+def orchestrator_agent(llm: OllamaConfig | None = None) -> AgentConfig:
+    cfg = _agent_from_rule("orchestrator", llm)
+    return replace(cfg, subagents=get_subagents())
 
 def run_web_search(task: str, llm: OllamaConfig | None = None,
                    audit_trail: AuditTrail | None = None, level: int = 0) -> AgentResult: ...
@@ -991,9 +972,10 @@ def run_orchestrator(task: str, llm: OllamaConfig | None = None) -> AgentResult:
 > Definiert fuer jeden der sechs vordefinierten Agenten ein
 > Factory-Paar: `<name>_agent(llm) -> AgentConfig` (aus dem Rule-File
 > in `rules/`) plus `run_<name>(task, llm, audit_trail, level) ->
-> AgentResult` als Convenience-Wrapper. Der Helper `_agent_from_rule`
-> laedt die jeweilige Markdown+YAML-Frontmatter-Konfiguration und
-> baut daraus ein `AgentConfig`.
+> AgentResult` als Convenience-Wrapper. Der Orchestrator erhaelt
+> zusaetzlich SubAgents via `get_subagents()`. Der Helper
+> `_agent_from_rule` laedt die jeweilige Markdown+YAML-Frontmatter-
+> Konfiguration und baut daraus ein `AgentConfig`.
 
 ---
 
@@ -1051,29 +1033,32 @@ Orchestrator-Delegationstool und das HITL-Plan-Submission-Tool.
 
 | Datei | Zweck |
 |-------|-------|
-| `__init__.py` | Importiert `builtins`, registriert `delegate_to` und `submit_plan` in der globalen Registry |
-| `builtins.py` | 9 Standard-Tools (`web_search`, `execute_python`, `read_file`, `list_files`, `http_get`, `http_post`, `read_csv`, `describe_data`, `query_data`) + Registry |
-| `delegate.py` | `delegate_to`-Tool fuer den Orchestrator (lazy imports) |
+| `__init__.py` | Importiert `builtins`, registriert `submit_plan` und Security-Tools in der globalen Registry |
+| `builtins.py` | 7 Domain-Tools (`web_search`, `execute_python`, `http_get`, `http_post`, `read_csv`, `describe_data`, `query_data`) + Registry |
 | `submit_plan.py` | `submit_plan`-Tool fuer HITL Plan-Phase + `parse_plan_from_args` |
+| `security.py` | 4 Security-Tools (`bandit_scan`, `secret_scan`, `audit_dependencies`, `security_scan`) |
 
 #### `agent_smith/tools/__init__.py`
 
 ```python
 from agent_smith.tools.builtins import ALL_TOOLS, TOOL_MAP, get_tools
-from agent_smith.tools.delegate import delegate_to
 from agent_smith.tools.submit_plan import submit_plan
+from agent_smith.tools.security import (
+    bandit_scan, secret_scan, audit_dependencies, security_scan,
+)
 
-ALL_TOOLS.append(delegate_to)
-TOOL_MAP["delegate_to"] = delegate_to
+for _t in (bandit_scan, secret_scan, audit_dependencies, security_scan):
+    ALL_TOOLS.append(_t)
+    TOOL_MAP[_t.name] = _t
+
 ALL_TOOLS.append(submit_plan)
 TOOL_MAP["submit_plan"] = submit_plan
 ```
 
-> Importiert die Basis-Tools aus `builtins.py` und registriert die
-> separat definierten Tools `delegate_to` und `submit_plan` an die
-> globale Registry `ALL_TOOLS` / `TOOL_MAP`. Dadurch sind sie fuer
-> den Runner ueber `get_tools(["delegate_to", "submit_plan"])`
-> abrufbar.
+> Importiert die Domain-Tools aus `builtins.py` und registriert die
+> Security-Tools und `submit_plan` an die globale Registry `ALL_TOOLS` /
+> `TOOL_MAP`. Delegation (`delegate_to`) wird nicht mehr manuell
+> registriert — DeepAgents stellt ein built-in `task`-Tool bereit.
 
 #### `agent_smith/tools/builtins.py`
 
@@ -1093,10 +1078,6 @@ def web_search(query: str, max_results: int = 5) -> list[dict]: ...
 @tool
 def execute_python(code: str, timeout: int = 30) -> dict: ...
 @tool
-def read_file(path: str, max_chars: int = 10000) -> dict: ...
-@tool
-def list_files(path: str = ".", pattern: str = "*") -> list[str]: ...
-@tool
 def http_get(url: str, headers: dict | None = None, params: dict | None = None) -> dict: ...
 @tool
 def http_post(url: str, body: dict, headers: dict | None = None) -> dict: ...
@@ -1107,43 +1088,29 @@ def describe_data(path: str) -> dict: ...
 @tool
 def query_data(path: str, query: str, columns: list[str] | None = None) -> dict: ...
 
-ALL_TOOLS: list = [web_search, execute_python, read_file, list_files,
-                  http_get, http_post, read_csv, describe_data, query_data]
+ALL_TOOLS: list = [web_search, execute_python,
+                  http_get, http_post,
+                  read_csv, describe_data, query_data]
 TOOL_MAP: dict[str, object] = {t.name: t for t in ALL_TOOLS}
 
 def get_tools(names: list[str] | None = None) -> list: ...
 ```
 
-> Neun mit `@tool` dekorierte Standard-Tools. Jedes Tool faengt seine
-> eigenen Fehler ab und liefert im Fehlerfall ein `{"error": "..."}`-
-> Dict zurueck (nie eine Exception an den Caller). Die Liste
-> `ALL_TOOLS` und das Dict `TOOL_MAP` bilden die globale Registry;
-> `get_tools(names)` gibt Tools nach Name zurueck (oder alle, wenn
-> `names=None`).
+> Sieben mit `@tool` dekorierte Domain-Tools. Dateisystem-Tools
+> (`read_file`, `ls`, `glob`, `grep`, `write_file`, `edit_file`) werden
+> von DeepAgents built-in bereitgestellt. Jedes Tool faengt seine eigenen
+> Fehler ab und liefert im Fehlerfall ein `{"error": "..."}`-Dict zurueck
+> (nie eine Exception an den Caller). Die Liste `ALL_TOOLS` und das Dict
+> `TOOL_MAP` bilden die globale Registry; `get_tools(names)` gibt Tools
+> nach Name zurueck (oder alle, wenn `names=None`).
 
-#### `agent_smith/tools/delegate.py`
+#### `agent_smith/tools/delegate.py` (entfernt)
 
-```python
-from langchain_core.tools import tool
-from agent_smith.audit import get_current_trail, get_current_level
-
-@tool
-def delegate_to(agent: str, task: str) -> str:
-    """Delegate a subtask to a specialist agent.
-    Available agents: WebSearchAgent, CodeExecutionAgent, DocumentAgent, APIAgent, DataAgent.
-    """
-    from agent_smith.agents.builtins import (
-        run_api, run_code, run_data, run_document, run_web_search,
-    )
-    ...
-```
-
-> Exklusiv fuer den OrchestratorAgent. Nimmt einen Agent-Namen und
-> eine Aufgabe entgegen, ruft den entsprechenden Specialist-Agenten
-> via `run_*`-Funktion auf und reicht den Audit-Trail ueber
-> Context-Variablen weiter. **Lazy imports** im Funktionskoerper
-> vermeiden zirkulare Abhaengigkeiten zwischen `tools/__init__.py`
-> und `agents/builtins.py`.
+`delegate_to` als separates LangChain-Tool existiert nicht mehr. Die
+Delegation an Specialist-Agenten erfolgt jetzt ueber DeepAgents'
+built-in `task`-Tool mit SubAgent-Konfiguration (siehe §9). Das
+entfernt ~60 Zeilen Code, inklusive Lazy-Import-Pattern und
+Dispatch-Dict.
 
 #### `agent_smith/tools/submit_plan.py`
 
@@ -1175,13 +1142,42 @@ def submit_plan(
 > strukturierte Argumente (`subtasks: list[dict]`, `reasoning: str`),
 > validiert sie (Agent-Name, non-empty Subtasks, non-empty Tasks)
 > und liefert den Marker `"PLAN_SUBMITTED"` zurueck. `parse_plan_from_args`
-> ist die Bruecke zum Runner: Sie akzeptiert sowohl das neue Format
-> (`subtasks` + `reasoning`) als auch das alte Backward-Compat-Format
-> (`plan_json`-String).
+> ist die Bruecke zum Runner: Sie extrahiert den Plan aus den
+> `tool_calls`-Argumenten des DeepAgents-Interrupts.
 
 ---
 
-### 13.4 `agent_smith/workflows/` — Workflow-Engine
+### 13.4 `agent_smith/tools/security.py` — Security-Tools
+
+Vier Sicherheitsscanner als LangChain-Tools. Jedes Tool kapselt ein externes
+Tool mit Regex-Fallback.
+
+| Datei | Tool | Scanner | Zweck |
+|-------|------|---------|-------|
+| `security.py` | `bandit_scan(path)` | bandit | Python-Security-Linter (eval, exec, pickle, SQL-Injection) |
+| `security.py` | `secret_scan(path)` | gitleaks / Regex | Secrets erkennen (API-Keys, Passwords, Tokens) |
+| `security.py` | `audit_dependencies()` | pip-audit | CVE-Scan von Python-Dependencies |
+| `security.py` | `security_scan(path)` | Alle drei | Aggregierter Report mit Bestanden/Nicht Bestanden |
+
+```python
+@tool
+def bandit_scan(path: str = ".") -> dict:
+    """Run bandit Python security linter."""
+
+@tool
+def secret_scan(path: str = ".") -> dict:
+    """Scan for secrets via gitleaks or regex fallback."""
+
+@tool
+def audit_dependencies() -> dict:
+    """Audit Python dependencies for CVEs."""
+
+@tool
+def security_scan(path: str = ".") -> dict:
+    """Run all scanners and return combined report."""
+```
+
+### 13.5 `agent_smith/workflows/` — Workflow-Engine
 
 Der `workflows/`-Folder enthaelt die Multi-Step-Orchestrierung: Sequenzen,
 parallele Ausfuehrung und Verzweigungen. Er kombiniert Agenten zu
@@ -1253,6 +1249,12 @@ def run_conditional(
 ```bash
 # Alle Unit-Tests (kein Ollama noetig)
 python -m pytest tests/ -v
+
+# Nur Security-Tests
+python -m pytest tests/test_security.py -v
+
+# Nur MCP-Routing-Tests
+python -m pytest tests/test_mcp_routing.py -v
 
 # Nur HITL-Tests
 python -m pytest tests/test_hitl.py -v

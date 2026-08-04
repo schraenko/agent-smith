@@ -1,7 +1,7 @@
 ---
 title: "Features & Ideen"
 author: "Marco Schrank"
-date: "2026-07-28"
+date: "2026-07-30"
 tags:
   - features
   - ideen
@@ -32,16 +32,17 @@ abstract: "Lebendes Dokument zur Verfolgung aller Features, Ideen und geplanter 
 |---------|-----------|-------------|
 | Agentic Loop | Kern | `run_agent` mit Tool-Calling, Sliding-Window und Max-Iterationen |
 | 6 vordefinierte Agenten | Agenten | WebSearch, Code, Document, API, Data, Orchestrator |
-| 10 Tools | Tools | `web_search`, `execute_python`, `read_file`, `list_files`, `http_get`, `http_post`, `read_csv`, `describe_data`, `query_data`, `delegate_to` |
+| 7 Domain-Tools | Tools | `web_search`, `execute_python`, `http_get`, `http_post`, `read_csv`, `describe_data`, `query_data`. Dateisystem-Tools via DeepAgents built-in |
 | Rule-basierte Konfiguration | Konfiguration | Markdown+YAML-Frontmatter fuer Agenten-Definitionen in `rules/` |
 | Workflow-Engine | Workflows | `run_sequential`, `run_parallel`, `run_conditional` |
 | Memory-Utilities | Memory | `window()` (Sliding-Window), `last_assistant_text()` |
 | Ollama-LLM-Backend | Infrastruktur | `OllamaConfig` + `make_llm`/`make_llm_with_tools` Factory |
 | Docker-Setup | Infrastruktur | `Dockerfile.lc` + `docker-compose.yml` mit 3 Services |
 | Unit-Tests | Testing | 16 gemockte Tests, 3 Integrationstests (Ollama noetig) |
-| Orchestrator-Delegation | Agenten | `delegate_to`-Tool mit lazy-import Pattern fuer zirkularfreie Architektur |
+| Orchestrator-Delegation | Agenten | SubAgents via DeepAgents' built-in `task`-Tool, generiert aus Rule-Dateien via `get_subagents()` |
 | Convenience-API | Kern | `agent_smith.run()` als top-level Einstiegspunkt mit Agent-Dispatch |
 | Human-in-the-Loop | Agenten | `run_interactive(task, approval_callback)` — Orchestrator plant zuerst, holt User-Bestaetigung, fuehrt dann aus. Strukturierter JSON-Plan via `submit_plan`-Tool, Callback-basierte Approval-Schnittstelle. Audit-Actions: `plan_submitted`, `plan_approved`, `plan_rejected`. |
+| 4 Security-Tools | Sicherheit | `bandit_scan`, `secret_scan`, `audit_dependencies`, `security_scan` — Defense-in-Depth mit gitleaks/Regex-Fallback, bandit, pip-audit |
 
 ---
 
@@ -50,14 +51,14 @@ abstract: "Lebendes Dokument zur Verfolgung aller Features, Ideen und geplanter 
 | Idee | Kategorie | Status | Prioritaet | Beschreibung |
 |------|-----------|--------|------------|-------------|
 | `execute_python` Sandboxing | Sicherheit | idee | hoch | Code-Ausfuehrung in Sandbox/Container mit Ressourcen-Limits, Network-Restrictions |
-| Test-Abdeckung erhoebern | Testing | geplant | hoch | Tests fuer Rules-Parser, `delegate_to`, builtins convenience functions, parallel/conditional Workflows |
+| Test-Abdeckung erhoebern | Testing | geplant | hoch | Tests fuer Rules-Parser, SubAgent-Konfiguration, Security-Tools, parallel/conditional Workflows |
 | Bessere System-Prompts | Qualitaet | geplant | mittel | Ausgabeformat-Spezifikation, strukturierte Antworten, konkretere Anweisungen |
 | Formatter/Linter | Tooling | idee | mittel | ruff, mypy, pre-commit hooks einrichten |
 | `_trim`/`window` Deduplizierung | Refactoring | idee | niedrig | `runner._trim()` und `memory.store.window()` sind funktionsgleich — eine Loesung behalten |
-| Strukturierte Fehler in `delegate_to` | Qualitaet | idee | niedrig | Fehler als Dict statt String zurueckgeben |
+| Strukturierte Fehler in SubAgent-Ergebnissen | Qualitaet | idee | niedrig | Fehler als Dict statt String zurueckgeben (aktuell nur String aus DeepAgents) |
 | Dynamische Tool-Registrierung | Architektur | idee | niedrig | Kein Import-Seiteneffekt in `tools/__init__.py`, stattdessen explizite Registrierung |
 | `get_tools()` Warning bei unbekannten Namen | Qualitaet | idee | niedrig | Aktuell werden unbekannte Tool-Namen still ignoriert |
-| DeepAgents-Migration | Refactoring | idee | mittel | Siehe Abschnitt [DeepAgents-Migration](#deepagents-migration) unten |
+| DeepAgents-Migration | Refactoring | umgesetzt | mittel | Siehe Abschnitt [DeepAgents-Migration](#deepagents-migration) unten — migriert auf deepagents 0.6.12 |
 | Gradio Web-Client (Client-Server) | UI | idee | hoch | Siehe Abschnitt [Gradio Web-Client](#gradio-web-client) unten |
 
 ---

@@ -11,7 +11,7 @@ from agent_smith import (
 )
 from agent_smith.agents.builtins import web_search_agent
 from agent_smith.approval import Subtask
-from agent_smith.llm import make_llm, make_llm_with_tools
+from agent_smith.llm import make_llm
 
 def ask_llm(question:String):
     # Create an instance of the LLM
@@ -24,10 +24,13 @@ def ask_llm(question:String):
     # Print out the response
     print(response)
 
+def example_run():
+    result = run("Was ist die Entfernung von Nussloch nach Bruchsal?")
+    print(result.output if result.success else f"Failed: {result.error}")
+
 def example_simple():
     result = run("What is optical interferometry?", agent="web_search")
     print(result.output if result.success else f"Failed: {result.error}")
-
    
 
 def example_code():
@@ -39,7 +42,7 @@ def example_code():
 
 
 def example_sequential():
-    llm = OllamaConfig(model="mistral:latest", temperature=0.3)
+    llm = OllamaConfig(model="gemma4:12b", temperature=0.3)
     steps = [
         Step(
             name="research",
@@ -62,7 +65,7 @@ def example_sequential():
 
 
 def example_parallel():
-    llm = OllamaConfig(model="mistral:latest")
+    llm = OllamaConfig(model="gemma4:12b")
     steps = [
         Step("history",      web_search_agent(llm), lambda _: "History of interferometry"),
         Step("applications", web_search_agent(llm), lambda _: "Modern applications of interferometry"),
@@ -80,7 +83,7 @@ def example_parallel():
 #     "Recherchiere die aktuellen Fortschritte in der Quantencomputing-Forschung und fasse die wichtigsten Erkenntnisse in 3 Saetzen zusammen."
 # )
 
-HITL_TASK = ("ermittle die strecke von nussloch nach bruchsal und berechne den kraftstoffverbrauch für ein fahrzeug mit 7 liter verbrauch auf 100km")
+HITL_TASK = ("ermittle die strecke von nußloch nach bruchsal und berechne den kraftstoffverbrauch für ein fahrzeug mit 7 liter verbrauch auf 100km")
 
 def _print_plan(plan: Plan) -> None:
     print("\n" + "=" * 60)
@@ -164,68 +167,9 @@ def example_hitl_audit():
     print(result.audit_trail.format())
 
 
-# ─── MCP-Routing-Map (deterministische Tools) ────────────────────────────────
-
-def example_mcp_routing():
-    """MCP-Routing-Map: Orchestrator waehlt deterministisch osm_router fuer Routen."""
-    from agent_smith.mcp_routing import find_routing, list_routes
-
-    print("Aktive Routing-Eintraege:")
-    for r in list_routes():
-        print(f"  {r['task_type']:20s} -> {r['mcp_server']}.{r['tool_name']}")
-    print()
-
-    task = "Wie ist die Entfernung von Berlin nach Hamburg?"
-    route = find_routing(task)
-    print(f"Task:  {task}")
-    print(f"Match: {route.task_type if route else 'kein Match'}")
-    print()
-
-    def approval_callback(plan: Plan) -> ApprovalDecision:
-        print("\nPlan-Vorschlag:")
-        print(plan.format())
-        return ApprovalDecision(approved=True)
-
-    result = run_interactive(task, approval_callback)
-    print("\n=== Ergebnis ===")
-    print(result.output)
-    print("\n=== Audit (nur MCP-Calls) ===")
-    for entry in result.audit_trail.entries:
-        if entry.action in ("mcp_call", "mcp_call_result"):
-            print(f"  [{entry.action}] {entry.agent}.{entry.tool_name}")
-
-
-def example_mcp_weather():
-    """MCP-Routing-Map: Wetterabfrage via weather-MCP-Server."""
-    task = "Was ist das Wetter in Berlin?"
-
-    def approval_callback(plan: Plan) -> ApprovalDecision:
-        print(plan.format())
-        return ApprovalDecision(approved=True)
-
-    result = run_interactive(task, approval_callback)
-    print(result.output)
-
-
-def example_mcp_fallback():
-    """MCP-Routing-Map: Kein Match -> Orchestrator nutzt Standard-Agents."""
-    from agent_smith.mcp_routing import find_routing
-
-    task = "Was ist Python?"
-    route = find_routing(task)
-    print(f"Task:  {task}")
-    print(f"Match: {route.task_type if route else 'kein Match (Fallback zu Standard-Agents)'}")
-
-    def approval_callback(plan: Plan) -> ApprovalDecision:
-        print(plan.format())
-        return ApprovalDecision(approved=True)
-
-    result = run_interactive(task, approval_callback)
-    print(result.output)
-
-
 if __name__ == "__main__":
     examples = {
+        "run": example_run,
         "simple": example_simple,
         "code": example_code,
         "sequential": example_sequential,
@@ -234,9 +178,6 @@ if __name__ == "__main__":
         "hitl-auto-reject": example_hitl_auto_reject,
         "hitl-edit": example_hitl_edit,
         "hitl-audit": example_hitl_audit,
-        "mcp-routing": example_mcp_routing,
-        "mcp-weather": example_mcp_weather,
-        "mcp-fallback": example_mcp_fallback,
     }
 
     name = sys.argv[1] if len(sys.argv) > 1 else None
